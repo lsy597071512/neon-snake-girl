@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>锈带纪元 · 主页海报 CG 预览</title>
+    <style>
+      :root {
+        --bg: #10131a;
+        --panel: #1a2030;
+        --line: #2c3648;
+        --text: #e8ecf4;
+        --muted: #9aa3b5;
+        --accent: #e2b56a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        background: radial-gradient(900px 500px at 20% -10%, #243049, var(--bg));
+        color: var(--text);
+      }
+      header {
+        padding: 20px 24px;
+        border-bottom: 1px solid var(--line);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 22px;
+      }
+      .sub {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      main {
+        padding: 20px 24px 48px;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 16px;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+        cursor: zoom-in;
+      }
+      .card img {
+        width: 100%;
+        display: block;
+        aspect-ratio: 9 / 16;
+        object-fit: cover;
+        background: #000;
+      }
+      .meta {
+        padding: 12px;
+      }
+      .meta strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+      .meta span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .lightbox {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.85);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 20;
+        cursor: zoom-out;
+        padding: 20px;
+      }
+      .lightbox.open {
+        display: flex;
+      }
+      .lightbox img {
+        max-height: 92vh;
+        max-width: 92vw;
+        object-fit: contain;
+        border-radius: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>主页海报 CG 预览（竖屏 2K）</h1>
+      <p class="sub">点击放大。选定编号后告诉我，再接入开始页轮换。</p>
+    </header>
+    <main id="grid"></main>
+    <div class="lightbox" id="lb"><img id="lbimg" alt="" /></div>
+    <script>
+      const bust = Date.now();
+      const items = [
+        { n: 1, file: 'cg01-station-ridge-2k.png', title: '零号月台·山脊小队', cast: '澪 / 萤 / 凛' },
+        { n: 2, file: 'cg02-core-judgment-2k.png', title: '星核禁区·夜空裁决', cast: '天音 / 美羽' },
+        { n: 3, file: 'cg03-frost-valley-2k.png', title: '白棺谷·冰原伏击', cast: '黑织 / 雫' },
+        { n: 4, file: 'cg04-corridor-gate-2k.png', title: '锈带走廊·数字门', cast: '朱里 / 凛 / 铃' },
+        { n: 5, file: 'cg05-forge-ruins-2k.png', title: '熔炉城·熔流桥', cast: '椿 / 琥珀 / 芹奈' },
+      ];
+      const grid = document.getElementById('grid');
+      const lb = document.getElementById('lb');
+      const lbimg = document.getElementById('lbimg');
+      grid.innerHTML = items
+        .map((it) => {
+          const src = `./tex/poster-candidates/${it.file}?t=${bust}`;
+          return `<article class="card" data-src="${src}">
+          <img src="${src}" alt="${it.title}" loading="lazy" />
+          <div class="meta"><strong>#${it.n} ${it.title}</strong><span>${it.cast}</span></div>
+        </article>`;
+        })
+        .join('');
+      grid.addEventListener('click', (e) => {
+        const card = e.target.closest('.card');
+        if (!card) return;
+        lbimg.src = card.dataset.src;
+        lb.classList.add('open');
+      });
+      lb.addEventListener('click', () => lb.classList.remove('open'));
+    </script>
+  </body>
+</html>

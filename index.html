@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0b0f" />
+    <meta name="description" content="锈带纪元 - 机械少女废土跑酷战斗" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="x5-orientation" content="portrait" />
+    <meta name="x5-fullscreen" content="true" />
+    <meta name="x5-page-mode" content="app" />
+    <meta name="browsermode" content="application" />
+    <title>锈带纪元 · Rust Belt Era</title>
+    <link rel="icon" type="image/png" sizes="64x64" href="./favicon.png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <!-- P0/P1：大视频不 preload；海报/烟雾用 ship WebP（源 png 仍在 tex/） -->
+    <link rel="preload" href="./tex/beijing01_smoke.webp" as="image" type="image/webp" />
+    <link rel="preload" href="./tex/game-poster-v2-ridge.webp" as="image" type="image/webp" />
+    <link rel="preload" href="./tex/game-poster-v5-judgment.webp" as="image" type="image/webp" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="game-root"></div>
+      <div id="ui-root"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

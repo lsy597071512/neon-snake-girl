@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+.ai-dlg-layer-skin { position: relative; width: 200px; height: 300px; }
+.ai-dlg-skin-secondary {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+}
+.ai-dlg-skin-secondary:not([hidden]):not(.is-hidden) { z-index: 2; }
+.ai-dlg-skin-secondary[hidden],
+.ai-dlg-skin-secondary.is-hidden {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  z-index: 0 !important;
+}
+video.is-hidden { opacity: 0; }
+</style>
+</head>
+<body>
+<div class="ai-dlg-portrait-stage" data-dialogue-portrait-stage data-character-id="prismrift" data-skin-phase="discipline-sticky" data-discipline-pose-index="4" data-discipline-sticky-clip="pose4.webm">
+  <div class="ai-dlg-layer ai-dlg-layer-skin is-active" data-role="skin">
+    <video data-ai-live-portrait class="is-hidden" data-testid="primary"></video>
+    <video data-role="skin-secondary" data-skin-src="pose4.webm" data-testid="secondary"></video>
+  </div>
+</div>
+<script>
+function hideDialogueSecondaryHard(secondary) {
+  if (!secondary) return;
+  secondary.pause();
+  secondary.loop = false;
+  secondary.classList.remove('is-entering', 'is-exiting');
+  secondary.classList.add('is-hidden');
+  secondary.setAttribute('hidden', '');
+  secondary.setAttribute('aria-hidden', 'true');
+}
+function crossfadeToPrimary(stage) {
+  const primary = stage.querySelector('[data-ai-live-portrait]');
+  const secondary = stage.querySelector('[data-role="skin-secondary"]');
+  delete stage.dataset.disciplineStickyClip;
+  delete stage.dataset.disciplinePoseIndex;
+  stage.dataset.skinPhase = 'idle';
+  hideDialogueSecondaryHard(secondary);
+  if (primary) {
+    primary.classList.remove('is-hidden', 'is-exiting');
+    primary.classList.add('is-entering');
+  }
+  hideDialogueSecondaryHard(secondary);
+  return {
+    primaryHidden: primary.classList.contains('is-hidden'),
+    secondaryHasHidden: secondary.hasAttribute('hidden'),
+    secondaryIsHiddenClass: secondary.classList.contains('is-hidden'),
+    secondaryDisplay: getComputedStyle(secondary).display,
+    secondaryVisibility: getComputedStyle(secondary).visibility,
+    overlapFree: secondary.hasAttribute('hidden') || secondary.classList.contains('is-hidden') || primary.classList.contains('is-hidden'),
+  };
+}
+window.__runIdleSwitch = () => crossfadeToPrimary(document.querySelector('[data-dialogue-portrait-stage]'));
+</script>
+</body>
+</html>

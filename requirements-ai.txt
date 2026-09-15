@@ -1,0 +1,13 @@
+transformers==5.15.0
+torch==2.11.0+cu130
+peft==0.20.0
+bitsandbytes>=0.45.0
+accelerate==1.14.0
+datasets==5.0.1
+tokenizers==0.22.2
+sentencepiece==0.2.2
+tiktoken==0.14.0
+scipy==1.18.0
+numpy==2.5.2
+safetensors>=0.4.0
+huggingface_hub>=0.20.0

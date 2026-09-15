@@ -1,0 +1,989 @@
+{
+  "camp_qingchen": {
+    "id": "camp_qingchen",
+    "label": "废弃营地·清晨",
+    "kind": "camp",
+    "image": "./tex/beijing01_qingchen.png",
+    "period": "qingchen",
+    "weather": "hazy",
+    "locationName": "废弃营地外景",
+    "atmosphere": "黄绿尘霾、漫射天光，空气闷热沉重，营地刚从夜里醒过来。",
+    "sensory": [
+      "沙尘味",
+      "锈铁凉意退去",
+      "远处工业塔影",
+      "履带车半埋沙中"
+    ],
+    "dialogueHints": [
+      "提到困倦与巡检",
+      "抱怨沙进机械",
+      "确认谁守过夜",
+      "计划今日路线"
+    ],
+    "interactables": [
+      "营地入口坡道",
+      "黄履带车",
+      "锈桶",
+      "红旗"
+    ]
+  },
+  "camp_zhongwu": {
+    "id": "camp_zhongwu",
+    "label": "废弃营地·正午",
+    "kind": "camp",
+    "image": "./tex/beijing01_zhongwu.png",
+    "period": "zhongwu",
+    "weather": "dusty",
+    "locationName": "废弃营地外景",
+    "atmosphere": "烈日穿透沙尘，金属高光刺眼，阴影短而硬。",
+    "sensory": [
+      "灼热金属味",
+      "强光眩目",
+      "沙粒滚动声",
+      "干渴感"
+    ],
+    "dialogueHints": [
+      "嫌热",
+      "催促补给",
+      "躲荫处说话",
+      "缩短闲聊"
+    ],
+    "interactables": [
+      "遮阳篷",
+      "入口",
+      "履带车",
+      "废铁堆"
+    ]
+  },
+  "camp_huanghun": {
+    "id": "camp_huanghun",
+    "label": "废弃营地·黄昏",
+    "kind": "camp",
+    "image": "./tex/beijing01_huanghun.png",
+    "period": "huanghun",
+    "weather": "clear",
+    "locationName": "废弃营地外景",
+    "atmosphere": "橙金逆光拉长影子，一天收束，风里带一点凉。",
+    "sensory": [
+      "暖橙光",
+      "长影",
+      "风过管线的哨声",
+      "归营脚步"
+    ],
+    "dialogueHints": [
+      "汇报今日战果",
+      "催人回营",
+      "看夕阳短暂沉默",
+      "安排夜班"
+    ],
+    "interactables": [
+      "红旗",
+      "坡道",
+      "阳台",
+      "烟囱"
+    ]
+  },
+  "camp_bangwan": {
+    "id": "camp_bangwan",
+    "label": "废弃营地·傍晚",
+    "kind": "camp",
+    "image": "./tex/beijing01_bangwan01.png",
+    "period": "bangwan",
+    "weather": "clear",
+    "locationName": "废弃营地外景",
+    "atmosphere": "满月初升，窗外暖黄灯亮起，营地从生存外壳变成可归处。",
+    "sensory": [
+      "月光冷蓝",
+      "窗内暖黄",
+      "夜沙细响",
+      "低语与修理声"
+    ],
+    "dialogueHints": [
+      "放松但仍警觉",
+      "分享食物",
+      "谈白天不敢说的事",
+      "看谁的灯还亮着"
+    ],
+    "interactables": [
+      "亮灯船桥舱",
+      "入口",
+      "履带车",
+      "天线红点"
+    ]
+  },
+  "camp_bangwan02": {
+    "id": "camp_bangwan02",
+    "label": "废弃营地·入夜",
+    "kind": "camp",
+    "image": "./tex/beijing01_bangwan02.png",
+    "period": "bangwan",
+    "weather": "clear",
+    "locationName": "废弃营地外景",
+    "atmosphere": "月光与营地灯对峙，低雾贴地，夜更静。",
+    "sensory": [
+      "雾气",
+      "月光",
+      "灯柱",
+      "远处空响"
+    ],
+    "dialogueHints": [
+      "小声说话",
+      "查哨",
+      "忌讳大声",
+      "提到怕静默"
+    ],
+    "interactables": [
+      "入口灯",
+      "红旗",
+      "履带车",
+      "雾中废铁"
+    ]
+  },
+  "camp_shenye": {
+    "id": "camp_shenye",
+    "label": "废弃营地·深夜",
+    "kind": "camp",
+    "image": "./tex/beijing01_shenye.png",
+    "period": "shenye",
+    "weather": "clear",
+    "locationName": "废弃营地外景",
+    "atmosphere": "冷蓝月色主导，灯火极少，世界像被按了静音。",
+    "sensory": [
+      "冷",
+      "静",
+      "月光边缘",
+      "偶尔一声金属响"
+    ],
+    "dialogueHints": [
+      "短句",
+      "守夜话题",
+      "秘密更易出口",
+      "催人去睡"
+    ],
+    "interactables": [
+      "唯一亮窗",
+      "月",
+      "沙丘",
+      "暗影侧"
+    ]
+  },
+  "camp_shenye02": {
+    "id": "camp_shenye02",
+    "label": "废弃营地·后夜",
+    "kind": "camp",
+    "image": "./tex/beijing01_shenye02.png",
+    "period": "shenye",
+    "weather": "clear",
+    "locationName": "废弃营地外景",
+    "atmosphere": "更深的蓝灰，锈色发暗，只有门口一点暖光证明还有人醒着。",
+    "sensory": [
+      "更深的冷",
+      "入口暖光",
+      "雾带",
+      "孤独感"
+    ],
+    "dialogueHints": [
+      "守夜独白感",
+      "问你为何还不睡",
+      "谈怕与债",
+      "几乎不闲聊"
+    ],
+    "interactables": [
+      "亮门",
+      "履带车",
+      "红旗残影",
+      "雾"
+    ]
+  },
+  "camp_qingtian": {
+    "id": "camp_qingtian",
+    "label": "废弃营地·晴天",
+    "kind": "camp",
+    "image": "./tex/beijing01_qingtian.png",
+    "period": "qingtian",
+    "weather": "clear",
+    "locationName": "废弃营地外景",
+    "atmosphere": "少见的蓝天，能见度高，营地显得可修、可干事。",
+    "sensory": [
+      "干爽风",
+      "清晰远塔",
+      "阳光直晒",
+      "修理敲击声"
+    ],
+    "dialogueHints": [
+      "趁好天气修械",
+      "侦查更远",
+      "心情略松",
+      "安排外出"
+    ],
+    "interactables": [
+      "蓝天",
+      "坡道",
+      "履带车",
+      "锈桶"
+    ]
+  },
+  "camp_xiayu_huanghun": {
+    "id": "camp_xiayu_huanghun",
+    "label": "废弃营地·雨后黄昏",
+    "kind": "camp",
+    "image": "./tex/beijing01_xiayu_huanghun.png",
+    "period": "huanghun",
+    "weather": "rain",
+    "locationName": "废弃营地外景",
+    "atmosphere": "泥地反光、湿锈气味，暖窗灯在水洼里碎开，一天被雨洗过。",
+    "sensory": [
+      "湿铁味",
+      "泥泞",
+      "水洼倒影",
+      "雨后凉风"
+    ],
+    "dialogueHints": [
+      "抱怨泥",
+      "关心进水设备",
+      "难得诗意一句",
+      "催人擦械"
+    ],
+    "interactables": [
+      "水洼",
+      "亮窗",
+      "履带车",
+      "湿旗"
+    ]
+  },
+  "camp_yard": {
+    "id": "camp_yard",
+    "label": "营地门口附近",
+    "kind": "camp",
+    "image": "./tex/Indoor/shinei01_outdoor_gate_day.png",
+    "imageNight": "./tex/Indoor/shinei01_outdoor_gate_night.png",
+    "period": "any",
+    "weather": "dusty",
+    "locationName": "家园营地·大门外侧近处",
+    "atmosphere": "不出远征的门口沙地，风沙与室内暖灯交界，适合透气、守门、拍灰。",
+    "sensory": [
+      "沙尘",
+      "门轴锈响",
+      "室内传出的人声",
+      "履带车轮廓"
+    ],
+    "dialogueHints": [
+      "拍灰进门",
+      "守一会儿",
+      "嫌风大",
+      "问里面谁在吵"
+    ],
+    "interactables": [
+      "大门",
+      "沙地",
+      "履带车"
+    ]
+  },
+  "outdoor_gate": {
+    "id": "outdoor_gate",
+    "label": "营地大门",
+    "kind": "camp",
+    "image": "./tex/Indoor/shinei01_outdoor_gate_day.png",
+    "imageNight": "./tex/Indoor/shinei01_outdoor_gate_night.png",
+    "period": "any",
+    "weather": "dusty",
+    "locationName": "家园营地·西侧大门",
+    "atmosphere": "木桩与锈铁拼成的营地大门内侧沙地，守门透气、修门、外出思考都不真正离营。",
+    "sensory": ["沙尘", "门轴锈响", "围栏阴影", "远处主楼轮廓"],
+    "dialogueHints": ["守一会儿", "拍灰", "嫌风大", "说说想不想出门"],
+    "interactables": ["大门", "沙地", "围栏"]
+  },
+  "outdoor_tower": {
+    "id": "outdoor_tower",
+    "label": "警卫塔",
+    "kind": "camp",
+    "image": "./tex/Indoor/shinei01_outdoor_tower_day.png",
+    "imageNight": "./tex/Indoor/shinei01_outdoor_tower_night.png",
+    "period": "any",
+    "weather": "dusty",
+    "locationName": "家园营地·西北警卫塔",
+    "atmosphere": "锈铁圆塔与瞭望台，安静、适合远眺与低声叙情，能读营地天气与沙尘。",
+    "sensory": ["高处风声", "锈铁踏板", "远方沙线", "灯火/日光"],
+    "dialogueHints": ["看远处", "读天气", "小声叙情", "守望"],
+    "interactables": ["瞭望台", "爬梯", "探照灯"]
+  },
+  "outdoor_pool": {
+    "id": "outdoor_pool",
+    "label": "泳池",
+    "kind": "camp",
+    "image": "./tex/Indoor/shinei01_outdoor_pool_day.png",
+    "imageNight": "./tex/Indoor/shinei01_outdoor_pool_night.png",
+    "period": "any",
+    "weather": "dusty",
+    "locationName": "家园营地·西南精修水池",
+    "atmosphere": "废土里精修的椭圆形水池，青绿水面与木栅，适合游泳、玩水、清洗与泳池派对。",
+    "sensory": ["水汽", "氯/金属味", "沙地反光", "水声"],
+    "dialogueHints": ["下水吗", "清洗池边", "嫌晒", "约泳池派对"],
+    "interactables": ["水池", "木栅", "池边机械"]
+  },
+  "indoor_shop": {
+    "id": "indoor_shop",
+    "label": "商店",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_shop.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·东侧废土杂货铺",
+    "atmosphere": "柜台与货架塞满修装修营零件，暖灯下可自助采购（每次 1 锈币）或只逛闲聊。",
+    "sensory": ["机油味", "货架金属响", "暖灯泡", "沙尘缝隙"],
+    "dialogueHints": ["缺什么零件", "逛一圈", "嫌贵", "盘点货架"],
+    "interactables": ["柜台", "货架", "零件箱"]
+  },
+  "indoor_shop_bed": {
+    "id": "indoor_shop_bed",
+    "label": "商店卧室",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_shop_bed.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·商店附属休息间",
+    "atmosphere": "店后窄卧，可小憩换装，偏私密，非主楼卧室编制。",
+    "sensory": ["床铺布料", "店内远响", "暖台灯", "纸箱味"],
+    "dialogueHints": ["歇一会儿", "整理随身物", "店事低语"],
+    "interactables": ["窄床", "储柜", "纸箱"]
+  },
+  "indoor_armory": {
+    "id": "indoor_armory",
+    "label": "武器库",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_armory.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·东南武器库",
+    "atmosphere": "枪架弹药箱与擦枪台，可点检武装、逛库、聊战争回忆，但不是出营作战口。",
+    "sensory": ["枪油", "金属碰撞", "暖工灯", "木箱"],
+    "dialogueHints": ["点检", "擦枪", "战争话题", "逛库"],
+    "interactables": ["枪架", "弹药箱", "工作台"]
+  },
+  "indoor_dating": {
+    "id": "indoor_dating",
+    "label": "一楼·大厅1",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_yilou_dating.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·一楼大厅1（枢纽）",
+    "atmosphere": "一楼大厅1：工作台、白板「NEON SNAKE DOMINION OUTPOST」、暖顶灯与杂乱电缆，内侧有通往上层的锈铁梯，是进出卧室/浴室/机房的枢纽。",
+    "sensory": [
+      "焊锡与机油",
+      "电缆拖地",
+      "多人经过的脚步",
+      "白板笔迹"
+    ],
+    "dialogueHints": [
+      "谈谁刚从楼梯下来",
+      "修东西",
+      "吐槽杂乱",
+      "约去大厅2吃饭"
+    ],
+    "interactables": [
+      "工作台",
+      "白板",
+      "通往楼梯",
+      "储物箱"
+    ]
+  },
+  "indoor_dating02": {
+    "id": "indoor_dating02",
+    "label": "一楼·大厅2",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_yilou_dating02.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·一楼大厅2（南侧大厅）",
+    "atmosphere": "一楼大厅2：地坪中央有锈黄星徽圆标，夹层回廊俯视，红旗与工具台，一侧连仓库与卧室3，西侧可感机械区轰鸣。与大厅1是不同空间，禁止说成同一间。",
+    "sensory": [
+      "金属地坪",
+      "红旗布料",
+      "夹层脚步",
+      "远处罐体嗡鸣"
+    ],
+    "dialogueHints": [
+      "吃饭开会",
+      "争座位",
+      "提到仓库补货",
+      "拉人去机械区"
+    ],
+    "interactables": [
+      "星徽地坪",
+      "工具台",
+      "通往仓库",
+      "通往卧室3"
+    ]
+  },
+  "indoor_woshi01": {
+    "id": "indoor_woshi01",
+    "label": "一楼·卧室1",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_woshi01.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·一楼卧室1",
+    "atmosphere": "工业窄舱单人床与夜灯，门直通大厅1，私密但克制。",
+    "sensory": [
+      "金属地板",
+      "暖灯",
+      "旧显示器",
+      "大厅隐约人声"
+    ],
+    "dialogueHints": [
+      "更私人",
+      "放低音量",
+      "谈休息与秘密",
+      "不欢迎久留时可赶人"
+    ],
+    "interactables": [
+      "床",
+      "夜柜",
+      "门通大厅1"
+    ]
+  },
+  "indoor_woshi02": {
+    "id": "indoor_woshi02",
+    "label": "一楼·卧室2",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_woshi02.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·一楼卧室2",
+    "atmosphere": "工业壳里塞进柔软织物，门通大厅1，像硬世界里的避难所。",
+    "sensory": [
+      "织物",
+      "暖光",
+      "柜门轻响",
+      "大厅脚步"
+    ],
+    "dialogueHints": [
+      "放松、暧昧留白",
+      "谈爱好",
+      "护短私人物品",
+      "不想被外人看见的一面"
+    ],
+    "interactables": [
+      "床",
+      "柜",
+      "门通大厅1"
+    ]
+  },
+  "indoor_woshi03": {
+    "id": "indoor_woshi03",
+    "label": "一楼·卧室3",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_woshi03.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·一楼卧室3",
+    "atmosphere": "稍大的卧室，床桌柜齐全，门通大厅2聚餐区。",
+    "sensory": [
+      "霓虹或暖灯",
+      "地毯",
+      "餐桌区隐约声",
+      "小机件嗡鸣"
+    ],
+    "dialogueHints": [
+      "更活泼或反差",
+      "谈收藏",
+      "约去大厅2",
+      "突然认真"
+    ],
+    "interactables": [
+      "床",
+      "书桌",
+      "门通大厅2"
+    ]
+  },
+  "indoor_yushi": {
+    "id": "indoor_yushi",
+    "label": "一楼·浴室",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_yushi.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·一楼浴室",
+    "atmosphere": "管线密布的浴室，浴缸洗手台与工业热水器，门侧通大厅1。",
+    "sensory": [
+      "潮气",
+      "管道嗡鸣",
+      "瓷白对比锈管",
+      "排水格栅"
+    ],
+    "dialogueHints": [
+      "羞恼被撞见",
+      "谈清洁稀缺",
+      "伤势护理",
+      "短促赶人"
+    ],
+    "interactables": [
+      "浴缸",
+      "洗手台",
+      "热水器"
+    ]
+  },
+  "indoor_jifang": {
+    "id": "indoor_jifang",
+    "label": "一楼·机房",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_yilou_jifang.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·一楼机房",
+    "atmosphere": "锅炉管线与发电机挤在东北角，热浪与轰鸣，营地动力心脏。",
+    "sensory": [
+      "机油热气",
+      "发电机低频",
+      "管壁烫感",
+      "警示灯"
+    ],
+    "dialogueHints": [
+      "检修动力",
+      "嫌吵",
+      "警告别碰阀门",
+      "抱怨散热"
+    ],
+    "interactables": [
+      "锅炉",
+      "管线",
+      "发电机"
+    ]
+  },
+  "indoor_damen": {
+    "id": "indoor_damen",
+    "label": "一楼·大门",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_yilou_damen.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·大门过渡区",
+    "atmosphere": "主入口过渡带，沙尘从门缝渗入，小沙发可歇脚，内侧即大厅1。",
+    "sensory": [
+      "沙尘味",
+      "门轴锈响",
+      "内外温差",
+      "沙发皮革"
+    ],
+    "dialogueHints": [
+      "刚进门拍灰",
+      "守门闲聊",
+      "问外面风沙",
+      "催人进大厅"
+    ],
+    "interactables": [
+      "大门",
+      "沙发",
+      "通往大厅1"
+    ]
+  },
+  "indoor_stairs": {
+    "id": "indoor_stairs",
+    "label": "楼梯间",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_stairs.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·楼梯（一楼↔二楼）",
+    "atmosphere": "金属宽梯是唯一换层通道，脚步会在中庭回响。",
+    "sensory": [
+      "踏步金属声",
+      "上下穿堂风",
+      "中庭回声",
+      "扶手凉"
+    ],
+    "dialogueHints": [
+      "上下楼碰面",
+      "嫌楼梯陡",
+      "听到二楼娱乐声",
+      "让道"
+    ],
+    "interactables": [
+      "楼梯",
+      "扶手",
+      "通往大厅1/中庭"
+    ]
+  },
+  "indoor_cangku": {
+    "id": "indoor_cangku",
+    "label": "一楼·仓库",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_yilou_cangku.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·一楼仓库",
+    "atmosphere": "货架木箱密排，补给与零件中转，夹在大厅1与大厅2之间。",
+    "sensory": [
+      "木屑与锈",
+      "箱盖磕碰",
+      "灰尘",
+      "清点声"
+    ],
+    "dialogueHints": [
+      "找零件",
+      "盘点",
+      "抱怨缺货",
+      "藏私货"
+    ],
+    "interactables": [
+      "货架",
+      "木箱",
+      "清单板"
+    ]
+  },
+  "indoor_jixie": {
+    "id": "indoor_jixie",
+    "label": "一楼·机械区",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_yilou_jixie.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·一楼机械区",
+    "atmosphere": "大厅2西侧大型罐体与粗管，过热与检修作业区。",
+    "sensory": [
+      "罐体低频",
+      "热浪",
+      "滴油",
+      "扳手敲击"
+    ],
+    "dialogueHints": [
+      "过热告警",
+      "退后三步",
+      "工序闲聊",
+      "听炉还剩多久"
+    ],
+    "interactables": [
+      "罐体",
+      "粗管",
+      "检修台"
+    ]
+  },
+  "indoor_dating_f2": {
+    "id": "indoor_dating_f2",
+    "label": "二楼·大厅西",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_erlou_dating01.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·二楼西大厅",
+    "atmosphere": "二楼西大厅：锈绿墙板与双排皮沙发、木茶几，右侧大窗望星沙荒原，后墙压力表与铜管。与南大厅是不同房间。",
+    "sensory": [
+      "沙发皮革",
+      "木地板",
+      "窗外星沙风",
+      "暖灯"
+    ],
+    "dialogueHints": [
+      "沙发闲聊",
+      "看窗外沙丘",
+      "约娱乐间",
+      "催人回卧室"
+    ],
+    "interactables": [
+      "皮沙发",
+      "茶几",
+      "压力表墙",
+      "通往中庭"
+    ]
+  },
+  "indoor_dating_f2b": {
+    "id": "indoor_dating_f2b",
+    "label": "二楼·大厅南",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_erlou_dating02.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·二楼南大厅",
+    "atmosphere": "二楼南大厅：金属夹层平台可俯视下层工位，窗外星沙，扶梯通向楼下工区；连娱乐间与卧室7。禁止与西大厅搞混。",
+    "sensory": [
+      "金属栏杆",
+      "下层工具声",
+      "暖窗光",
+      "台球碰撞远音"
+    ],
+    "dialogueHints": [
+      "探头看下层",
+      "八卦",
+      "拉去打球",
+      "夜谈"
+    ],
+    "interactables": [
+      "夹层栏杆",
+      "扶梯",
+      "窗边座椅",
+      "通往娱乐间"
+    ]
+  },
+  "indoor_ting1": {
+    "id": "indoor_ting1",
+    "label": "二楼·厅1中庭",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_erlou_ting1.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·二楼中庭回廊",
+    "atmosphere": "栏杆环绕的中庭回廊，可俯视一楼，垂直声响清晰。无独立专图时借用南大厅夹层氛围，但地点仍是厅1中庭。",
+    "sensory": [
+      "栏杆凉",
+      "楼下餐桌声",
+      "穿堂风",
+      "回声"
+    ],
+    "dialogueHints": [
+      "探头看楼下",
+      "不愿被看见",
+      "等楼梯口的人",
+      "安静观察"
+    ],
+    "interactables": [
+      "栏杆",
+      "中庭开口",
+      "通往各厅"
+    ]
+  },
+  "indoor_yule": {
+    "id": "indoor_yule",
+    "label": "二楼·娱乐间",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_erlou_yulejian.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·二楼娱乐间",
+    "atmosphere": "台球桌与圆桌牌局，营地最轻松的社交点。",
+    "sensory": [
+      "台球撞击",
+      "木桌",
+      "零食罐头味",
+      "笑闹"
+    ],
+    "dialogueHints": [
+      "打赌",
+      "放松玩笑",
+      "突然认真一句",
+      "赶去睡觉"
+    ],
+    "interactables": [
+      "台球桌",
+      "圆桌",
+      "储物柜"
+    ]
+  },
+  "indoor_wc2": {
+    "id": "indoor_wc2",
+    "label": "二楼·厕所",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_erlou_cesuo.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·二楼厕所",
+    "atmosphere": "隔间与洗手台的公厕，瓷砖潮气，靠近储物间。",
+    "sensory": [
+      "潮气",
+      "瓷砖",
+      "水管",
+      "洗手声"
+    ],
+    "dialogueHints": [
+      "尴尬撞见",
+      "短句",
+      "抱怨供水",
+      "洗伤口"
+    ],
+    "interactables": [
+      "隔间",
+      "洗手台"
+    ]
+  },
+  "indoor_chuwu": {
+    "id": "indoor_chuwu",
+    "label": "二楼·储物间",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_erlou_chuwujian.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·二楼储物间",
+    "atmosphere": "金属架与木箱，靠近楼梯口与厕所。",
+    "sensory": [
+      "灰尘",
+      "金属架",
+      "纸箱",
+      "楼梯脚步"
+    ],
+    "dialogueHints": [
+      "翻旧物",
+      "藏东西",
+      "找备用件",
+      "嫌挤"
+    ],
+    "interactables": [
+      "金属架",
+      "木箱"
+    ]
+  },
+  "indoor_woshi04": {
+    "id": "indoor_woshi04",
+    "label": "二楼·卧室4",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_woshi04.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·二楼卧室4",
+    "atmosphere": "西北卧室，双夜灯与地毯，门向西大厅。",
+    "sensory": [
+      "双灯暖光",
+      "地毯",
+      "安静",
+      "西厅隐约声"
+    ],
+    "dialogueHints": [
+      "私人话题",
+      "低声",
+      "赶人",
+      "听楼下"
+    ],
+    "interactables": [
+      "床",
+      "夜灯",
+      "地毯"
+    ]
+  },
+  "indoor_woshi05": {
+    "id": "indoor_woshi05",
+    "label": "二楼·卧室5",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_woshi05.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·二楼卧室5",
+    "atmosphere": "北侧卧室，床与小书桌，邻厕所与卧室4。",
+    "sensory": [
+      "书桌灯",
+      "织物",
+      "远处冲水声可能",
+      "安静"
+    ],
+    "dialogueHints": [
+      "写点什么",
+      "休息",
+      "抱怨隔墙",
+      "约娱乐间"
+    ],
+    "interactables": [
+      "床",
+      "书桌"
+    ]
+  },
+  "indoor_woshi06": {
+    "id": "indoor_woshi06",
+    "label": "二楼·卧室6",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_woshi06.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·二楼卧室6",
+    "atmosphere": "西南卧室，双侧夜灯，连西大厅与南大厅。",
+    "sensory": [
+      "双侧灯",
+      "木地板",
+      "南厅笑语远音"
+    ],
+    "dialogueHints": [
+      "私密",
+      "听牌局",
+      "想安静",
+      "留人坐坐"
+    ],
+    "interactables": [
+      "床",
+      "夜灯"
+    ]
+  },
+  "indoor_woshi07": {
+    "id": "indoor_woshi07",
+    "label": "二楼·卧室7",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_woshi07.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·二楼卧室7",
+    "atmosphere": "东南卧室，大床与柜，门向南大厅。",
+    "sensory": [
+      "大床织物",
+      "柜门",
+      "南厅地毯区声"
+    ],
+    "dialogueHints": [
+      "疏离或终审感话题",
+      "短句",
+      "要空白",
+      "看中庭"
+    ],
+    "interactables": [
+      "大床",
+      "柜"
+    ]
+  },
+  "indoor_1lou_map": {
+    "id": "indoor_1lou_map",
+    "label": "平面图·一楼总览",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_1lou.jpg",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地一楼平面认知",
+    "atmosphere": "锈带工业营地一楼全貌：卧室、浴室、机房、大门、双大厅、仓库、机械区与楼梯。",
+    "sensory": [
+      "沙色外景",
+      "金属屋顶感",
+      "分区明确"
+    ],
+    "dialogueHints": [
+      "指路",
+      "说自己住哪",
+      "约在大厅碰面"
+    ],
+    "interactables": [
+      "各房间入口"
+    ]
+  },
+  "indoor_2lou_map": {
+    "id": "indoor_2lou_map",
+    "label": "平面图·二楼总览",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_2lou.jpg",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地二楼平面认知",
+    "atmosphere": "二楼中庭回廊、四间卧室、厕所储物、娱乐间与双大厅环线。",
+    "sensory": [
+      "中庭开口",
+      "木地板",
+      "暖灯分区"
+    ],
+    "dialogueHints": [
+      "指路上楼",
+      "约娱乐间",
+      "说卧室门朝哪"
+    ],
+    "interactables": [
+      "中庭",
+      "楼梯口",
+      "娱乐间"
+    ]
+  },
+  "indoor_tiaojiaoshi": {
+    "id": "indoor_tiaojiaoshi",
+    "label": "负一楼·小黑屋",
+    "kind": "indoor",
+    "image": "./tex/Indoor/shinei01_tiaojiaoshi.png",
+    "period": "any",
+    "weather": "indoor",
+    "locationName": "家园营地·负一楼机器人调教室（小黑屋）",
+    "atmosphere": "昏暗调教室：拘束装置与指挥官侧黑色机械触手工具隐约可见，空气压抑。",
+    "sensory": ["金属冷感", "低沉机械嗡鸣", "昏暗灯光", "拘束带触感"],
+    "dialogueHints": ["被动约束", "惩罚余波", "害怕或嘴硬", "禁止假装还在大厅"],
+    "interactables": ["拘束架", "机械触手装置", "调教台"]
+  }
+
+}

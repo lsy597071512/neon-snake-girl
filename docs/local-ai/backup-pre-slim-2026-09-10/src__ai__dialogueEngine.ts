@@ -1,0 +1,822 @@
+﻿import {
+  clampAffectionChange,
+} from './aiProfiles';
+import { chatDialogueStreamJson, chatJsonRouted } from './llmRouter';
+import {
+  archiveNpcTurn,
+  archivePlayerTurn,
+  getRecentChatsForPrompt,
+  pushCampLog,
+  pushMemory,
+  pushRecentChat,
+} from './memory';
+import { assembleNpcPairMessages, assemblePlayerDialogueMessages } from './promptAssembler';
+import { getLifeDigestLinesForPrompt } from './lifeArchive';
+import { adjustAffinity, adjustRelation } from './relationship';
+import { ingestFactsFromDialogueTurn } from './structuredFacts';
+import type { AiLivingSave, DialogueRequest, LlmDialogueResult, LightStatusTag } from './types';
+import {
+  applyCampItemAction,
+  normalizeItemOfferResolution,
+  settlePendingItemOffer,
+  type CampItemActionPayload,
+} from '../systems/CampWarehouseSystem';
+import type { SaveData } from '../types';
+import { saveManager } from '../core/SaveManager';
+import { getCoScreenGroupForCharacter } from './campEvents';
+import { applyBathIntimateConsentFromAi } from './bathIntimateConsent';
+import { applyDesireNextFromDialogue, commitPendingDesireAfterDialogue } from './desireNext';
+import { sanitizeCharacterDialogue } from './dialogueSanitize';
+import { isLocalHomeGpuDialoguePath, resolveCharacterModel } from './providerConfig';
+import { clampLocalHomeGpuDialogueResult } from './localHomeGpuClamp';
+import { applyBatheShowerSkins } from './campEvents/campEventEffects';
+import { syncDialogueWorldRealtime } from './dialogueWorldSync';
+import { captureDialogueSceneSnapshot } from './dialogueSceneSync';
+import {
+  beginDialogueRequest,
+  finishDialogueRequest,
+  isCurrentDialogueRequest,
+} from './dialogueRequestGuard';
+import { processTurnOutfitChange } from './outfitChangeProcess';
+import { evolvePersonaAfterTalk } from './characterPersona';
+import { applyMoodImpulse } from './moodContinuum';
+import { resolvePresence } from './livingState';
+import {
+  clearDisciplinePoseAwaiting,
+  consumeDisciplineJustEntered,
+  consumeDisciplineJustLeftTurn,
+  isDisciplineActiveFor,
+  maybeProposeDisciplineInvite,
+  recordDisciplineValenceHint,
+} from './disciplineSession';
+import { tryCommitPlayerTaskAgenda } from './characterAgenda';
+import {
+  isDeepSleeping,
+  leaveSleepSystem,
+  markSleepDisturbed,
+  tryWakeFromSpeech,
+} from './sleepSystem';
+import { CHARACTER_MAP } from '../data/characters';
+import {
+  EMOTION_POSE_CATALOG,
+  normalizeEmotionPoseKey,
+} from '../data/characterEmotionPoses';
+
+function stripParen(s: string): string {
+  return s.replace(/^[（(]\s*/, '').replace(/\s*[）)]$/, '').trim();
+}
+
+function looksLikePlayerFarewell(msg: string): boolean {
+  const t = msg.trim();
+  if (!t) return false;
+  return /^(再见|拜拜|拜|晚安|我走了|先走了|走了|回头聊|先这样|没事了|可以了|不聊了|挂了)([。.!！~～…]*)$/i.test(
+    t,
+  );
+}
+
+function looksLikePlayerClosing(msg: string): boolean {
+  const t = msg.trim();
+  if (!t) return false;
+  return (
+    looksLikePlayerFarewell(t) ||
+    /^(好的?|行|嗯+|哦+|喔+|知道了|明白了|了解|收到)([。.!！~～…]*)$/i.test(t)
+  );
+}
+
+function looksLikeLowEngagement(msg: string): boolean {
+  const t = msg.trim();
+  return /^(好的?|行|嗯+|哦+|喔+|哈哈*|呵呵*|是|对)([。.!！~～…]*)$/i.test(t);
+}
+
+function normalizeInterrupt(
+  raw: unknown,
+): LlmDialogueResult['interrupt_reaction'] | undefined {
+  const v = typeof raw === 'string' ? raw.toLowerCase() : '';
+  if (v === 'welcome' || v === 'tolerate' || v === 'annoyed' || v === 'angry') return v;
+  return undefined;
+}
+
+function normalizeResult(
+  raw: Partial<LlmDialogueResult>,
+  characterId: string,
+): LlmDialogueResult {
+  const affRaw = typeof raw.affection_change === 'number' ? raw.affection_change : 0;
+  const action = typeof raw.action === 'string' ? stripParen(raw.action) : '';
+  const thought = typeof raw.inner_thought === 'string' ? stripParen(raw.inner_thought) : '';
+  const end =
+    raw.end_conversation === true ||
+    raw.end_conversation === ('true' as unknown as boolean) ||
+    String(raw.end_conversation).toLowerCase() === 'true';
+  const wantContinue =
+    raw.want_continue === true ||
+    raw.want_continue === ('true' as unknown as boolean) ||
+    String(raw.want_continue).toLowerCase() === 'true';
+  const skinRaw =
+    typeof raw.skin_change === 'string' ? raw.skin_change.trim() : '';
+  let skinClip: number | undefined;
+  {
+    const c = raw.skin_clip;
+    const n =
+      typeof c === 'number'
+        ? c
+        : typeof c === 'string' && c.trim() && c.trim() !== '""'
+          ? Number(c.trim())
+          : NaN;
+    if (Number.isFinite(n) && n >= 1) skinClip = Math.floor(n);
+  }
+  const bathConsentRaw =
+    raw.bath_intimate_consent === true ||
+    raw.bath_intimate_consent === false ||
+    typeof raw.bath_intimate_consent === 'string'
+      ? raw.bath_intimate_consent
+      : undefined;
+  const beat =
+    typeof raw.scene_beat === 'string' ? stripParen(raw.scene_beat).slice(0, 80) : '';
+  // P2：结构化世界意图（对象或 JSON 字符串都收；非法则弃用走文本推断）
+  let world_intent: LlmDialogueResult['world_intent'];
+  {
+    const wi = raw.world_intent;
+    let obj: unknown = wi;
+    if (typeof wi === 'string') {
+      const t = wi.trim();
+      if (t && t !== '""' && t !== '{}' && t.toLowerCase() !== 'none') {
+        try {
+          obj = JSON.parse(t);
+        } catch {
+          obj = null;
+        }
+      } else {
+        obj = null;
+      }
+    }
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+      const o = obj as Record<string, unknown>;
+      world_intent = {
+        move_to: typeof o.move_to === 'string' ? o.move_to.trim() : undefined,
+        outfit_action:
+          o.outfit_action === 'start' || o.outfit_action === 'finish'
+            ? o.outfit_action
+            : undefined,
+        target_skin: typeof o.target_skin === 'string' ? o.target_skin.trim() : undefined,
+        activity: typeof o.activity === 'string' ? o.activity.trim() : undefined,
+      };
+      if (!world_intent.move_to && !world_intent.outfit_action && !world_intent.activity) {
+        world_intent = undefined;
+      }
+    }
+  }
+  const memWrite =
+    typeof raw.memory_write === 'string' ? raw.memory_write.trim().slice(0, 100) : '';
+  let desire_next: LlmDialogueResult['desire_next'];
+  if (typeof raw.desire_next === 'string') {
+    const d = raw.desire_next.trim();
+    desire_next = d ? d : undefined;
+  } else if (raw.desire_next && typeof raw.desire_next === 'object') {
+    desire_next = raw.desire_next as LlmDialogueResult['desire_next'];
+  }
+  const poseRaw =
+    typeof raw.emotion_pose === 'string' ? raw.emotion_pose.trim() : '';
+  let emotion_pose = normalizeEmotionPoseKey(characterId, poseRaw);
+  if (!emotion_pose && raw.emotion) {
+    const fallback = EMOTION_POSE_CATALOG.find((e) => e.dialogueEmotion === raw.emotion);
+    if (fallback) emotion_pose = normalizeEmotionPoseKey(characterId, fallback.key);
+  }
+  let camp_item_action: LlmDialogueResult['camp_item_action'];
+  const cia = raw.camp_item_action;
+  if (typeof cia === 'string') {
+    const t = cia.trim();
+    if (t && t !== '""' && t !== '{}' && t.toLowerCase() !== 'none') {
+      try {
+        camp_item_action = JSON.parse(t) as CampItemActionPayload;
+      } catch {
+        camp_item_action = undefined;
+      }
+    }
+  } else if (cia && typeof cia === 'object') {
+    camp_item_action = cia as CampItemActionPayload;
+  }
+  const item_offer_resolution = normalizeItemOfferResolution(raw.item_offer_resolution);
+  const discipline_mood =
+    typeof raw.discipline_mood === 'string' ? raw.discipline_mood.trim().slice(0, 24) : undefined;
+  const dv = typeof raw.discipline_valence === 'string' ? raw.discipline_valence.trim().toLowerCase() : '';
+  const discipline_valence =
+    dv === 'tragic' || dv === 'mixed' || dv === 'joyful' ? dv : undefined;
+  return {
+    emotion: raw.emotion || 'neutral',
+    emotion_pose,
+    dialogue: sanitizeCharacterDialogue(raw.dialogue || '', characterId),
+    inner_thought: thought || undefined,
+    action: action || undefined,
+    type: raw.type || 'dialogue',
+    affection_change: clampAffectionChange(characterId, affRaw),
+    status_changes: Array.isArray(raw.status_changes) ? raw.status_changes : [],
+    trigger_jealousy: Array.isArray(raw.trigger_jealousy) ? raw.trigger_jealousy : [],
+    end_conversation: end,
+    end_reason: typeof raw.end_reason === 'string' ? raw.end_reason.trim().slice(0, 80) : undefined,
+    interrupt_reaction: normalizeInterrupt(raw.interrupt_reaction),
+    want_continue: wantContinue && !end,
+    skin_change: skinRaw || undefined,
+    skin_clip: skinClip,
+    discipline_mood,
+    discipline_valence,
+    world_intent,
+    bath_intimate_consent: bathConsentRaw,
+    scene_beat: beat || undefined,
+    desire_next,
+    memory_write: memWrite || undefined,
+    camp_item_action,
+    item_offer_resolution,
+  };
+}
+
+export type PlayerDialogueOpts = {
+  /** 流式 dialogue 字段（仅首包；补全/重写不回调） */
+  onDialoguePartial?: (text: string) => void;
+  signal?: AbortSignal;
+  /** 发话前位置/穿搭已对齐（可刷新立绘背景） */
+  onWorldSynced?: () => void;
+};
+
+function sameDialogueReality(
+  a: ReturnType<typeof captureDialogueSceneSnapshot>,
+  b: ReturnType<typeof captureDialogueSceneSnapshot>,
+): boolean {
+  return (
+    a.roomId === b.roomId &&
+    a.activity === b.activity &&
+    a.behavior === b.behavior &&
+    a.skinKey === b.skinKey
+  );
+}
+
+export async function runPlayerDialogue(
+  living: AiLivingSave,
+  req: DialogueRequest,
+  save?: SaveData | null,
+  opts?: PlayerDialogueOpts,
+): Promise<LlmDialogueResult> {
+  if (!living.lastTalkAt) living.lastTalkAt = {};
+  const liveSave = save ?? saveManager.get();
+  const isProactive =
+    req.turnMode === 'proactive' ||
+    req.turnMode === 'continue' ||
+    req.turnMode === 'outfit_reveal';
+  const closeHint = isProactive
+    ? ''
+    : isDisciplineActiveFor(living, req.characterId)
+      ? '你正处于小黑屋束缚中：end_conversation 必须 false；禁止假装未进房或逃走。'
+      : looksLikePlayerClosing(req.playerMessage)
+      ? '玩家本轮像在收尾/应承/告别：优先 end_conversation=true，给收尾句，禁止再派新任务。'
+      : looksLikeLowEngagement(req.playerMessage)
+        ? '玩家投入很低（短应承）：若话题已尽，请 end_conversation=true；不要为续聊硬编下一件杂事。'
+        : '';
+
+  const wantContinueHint =
+    req.turnMode === 'outfit_reveal'
+      ? '本轮是换装完成同步：want_continue=false，skin_change=""，只按新立绘说话。'
+      : isDisciplineActiveFor(living, req.characterId)
+        ? '小黑屋中：want_continue 默认 false；只有话真没说完才 true。禁止连发近义抗拒句。'
+        : isProactive
+          ? '若你还想一口气接着说（不等指挥官回），可 want_continue=true；若说完该等对方了则 want_continue=false。禁止无意义复读。'
+          : '若性格话痨且话题未尽、指挥官刚应承完你仍想补一句，可 want_continue=true；多数情况 false。';
+
+  const recentAssistant = getRecentChatsForPrompt(living, req.characterId)
+    .filter((t) => t.role === 'assistant')
+    .slice(-3)
+    .map((t) => t.text.trim())
+    .filter(Boolean);
+  const antiRepeatHint =
+    recentAssistant.length > 0
+      ? `禁止复读或近义改写你刚说过的话：${recentAssistant.map((t) => `「${t.slice(0, 36)}」`).join('、')}。`
+      : '';
+  const lease = beginDialogueRequest(req.characterId);
+  const abortFromCaller = () => lease.controller.abort();
+  if (opts?.signal) {
+    if (opts.signal.aborted) abortFromCaller();
+    else opts.signal.addEventListener('abort', abortFromCaller, { once: true });
+  }
+  try {
+    let requestScene = captureDialogueSceneSnapshot(living, req.characterId);
+    let raw: Partial<LlmDialogueResult> | undefined;
+
+    // A queue delay or an in-flight world update can invalidate the scene the model saw.
+    // Rebuild at execution time and retry once; stale turns never reach world mutation below.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const localGpu = isLocalHomeGpuDialoguePath();
+      const charModel = localGpu ? resolveCharacterModel(req.characterId) : '';
+      const streamOpts = {
+        channel: 'dialogue' as const,
+        // Fable 与千问同量级输出预算；温度略低以稳住 JSON
+        temperature: localGpu ? 1.0 : 0.95,
+        maxTokens: localGpu ? 480 : 720,
+        onDialoguePartial: opts?.onDialoguePartial,
+        signal: lease.controller.signal,
+        model: charModel || undefined,
+      };
+      raw = await chatDialogueStreamJson<Partial<LlmDialogueResult>>(async () => {
+        if (!isCurrentDialogueRequest(lease)) throw new DOMException('Superseded dialogue', 'AbortError');
+        requestScene = captureDialogueSceneSnapshot(living, req.characterId);
+        const { system, history, user } = await assemblePlayerDialogueMessages(living, req, liveSave);
+        const lifeLines = await getLifeDigestLinesForPrompt(req.characterId, 4);
+        const systemWithLife = lifeLines.length
+          ? `${system}\n\n【你近日在营地的生活痕迹】（本地存档，勿背诵成流水账）\n${lifeLines.map((l) => `- ${l}`).join('\n')}`
+          : system;
+        const coNow = getCoScreenGroupForCharacter(living, req.characterId);
+        const eventLockHint = coNow
+          ? `此刻同屏事件是「${coNow.eventName}」，dialogue 必须扣住这件事与同场同伴，禁止聊无关沙尘/风向。`
+          : '';
+        const footer = `（请只输出要求的 JSON 对象；键顺序建议先 dialogue，再 emotion/emotion_pose，其余字段其后。dialogue 要接上前文，禁止复读旧台词；禁止「才不是」类统一傲娇。action 与 inner_thought 本轮必填，各一句中文，不得空。记得填写 end_conversation / end_reason / interrupt_reaction / want_continue，以及 scene_beat、desire_next、memory_write、world_intent（无则 ""）。涉及买/卖/送礼/吃东西时填 camp_item_action，否则 ""。钱不够或仓库没货时不要假装成功。${eventLockHint}${closeHint ? ` ${closeHint}` : ''}${antiRepeatHint ? ` ${antiRepeatHint}` : ''} ${wantContinueHint}）`;
+        return [
+          { role: 'system' as const, content: systemWithLife },
+          ...history,
+          {
+            role: 'user' as const,
+            content: `${user}\n\n${footer}`,
+          },
+        ];
+      }, streamOpts);
+      if (!isCurrentDialogueRequest(lease)) throw new DOMException('Superseded dialogue', 'AbortError');
+      if (sameDialogueReality(requestScene, captureDialogueSceneSnapshot(living, req.characterId))) break;
+      console.info(`[dialogue-retry] ${req.characterId}: scene or skin changed during generation`);
+    }
+  if (!raw || !isCurrentDialogueRequest(lease) || !sameDialogueReality(requestScene, captureDialogueSceneSnapshot(living, req.characterId))) {
+    throw new DOMException('Dialogue context changed before commit', 'AbortError');
+  }
+  let result = normalizeResult(raw, req.characterId);
+  if (isLocalHomeGpuDialoguePath()) {
+    result = clampLocalHomeGpuDialogueResult(living, req, result);
+  }
+  const inDiscipline = isDisciplineActiveFor(living, req.characterId);
+
+  // 软兜底：明确告别时若模型漏标结束 → 仍收束；短应承交给模型判断（主动发言轮跳过）
+  // 小黑屋束缚中禁止收束逃走
+  if (
+    !inDiscipline &&
+    !isProactive &&
+    !result.end_conversation &&
+    looksLikePlayerFarewell(req.playerMessage)
+  ) {
+    result = {
+      ...result,
+      end_conversation: true,
+      end_reason: result.end_reason || '玩家告别，话题收束',
+      want_continue: false,
+    };
+  }
+
+  // 连续短应承（好/行/嗯…）≥2 轮仍不结束 → 强制收束，防止无限派活
+  if (
+    !inDiscipline &&
+    !isProactive &&
+    !result.end_conversation &&
+    looksLikeLowEngagement(req.playerMessage)
+  ) {
+    const hist = living.recentChats?.[req.characterId] ?? [];
+    let streak = 1;
+    for (let i = hist.length - 1; i >= 0; i--) {
+      const turn = hist[i];
+      if (turn.role !== 'user') continue;
+      if (looksLikeLowEngagement(turn.text)) streak += 1;
+      else break;
+    }
+    if (streak >= 2) {
+      result = {
+        ...result,
+        end_conversation: true,
+        end_reason: result.end_reason || '玩家连续短应承，话题已尽',
+        interrupt_reaction: result.interrupt_reaction ?? 'tolerate',
+      };
+    }
+  }
+
+  // 忙碌态被连续打扰：若模型已标 annoyed/angry 却未结束 → 强制结束
+  // 小黑屋会话排除（束缚中不能因「烦」关掉对话逃走）
+  if (!inDiscipline) {
+    const act = resolvePresence(req.characterId, living).activity;
+    const dnd = ['sleeping', 'bathe', 'maintain', 'busy', 'guard'].includes(act);
+    if (
+      dnd &&
+      !result.end_conversation &&
+      (result.interrupt_reaction === 'annoyed' || result.interrupt_reaction === 'angry')
+    ) {
+      result = {
+        ...result,
+        end_conversation: true,
+        end_reason: result.end_reason || '正在做事，不想再被缠',
+      };
+    }
+  }
+
+  // 小黑屋硬钳制：无法离开、无法换装逃走；抑制连珠炮 want_continue
+  if (inDiscipline) {
+    result = {
+      ...result,
+      end_conversation: false,
+      end_reason: undefined,
+      skin_change: '',
+      desire_next: undefined,
+      want_continue: false,
+      world_intent: result.world_intent
+        ? {
+            ...(typeof result.world_intent === 'object' ? result.world_intent : {}),
+            move_to: '',
+            outfit_action: undefined,
+            target_skin: '',
+          }
+        : { move_to: '', outfit_action: undefined, target_skin: '' },
+    };
+  }
+
+  // 动作和心声是展示字段。千问路径可本地补齐；本机 Fable Q4 禁止程序代写，必须用模型原文。
+  if (
+    !isLocalHomeGpuDialoguePath() &&
+    (!result.action?.trim() || !result.inner_thought?.trim())
+  ) {
+    result = {
+      ...result,
+      action: result.action || '看向指挥官，神情微动',
+      inner_thought: result.inner_thought || '先听听指挥官想说什么。',
+    };
+  }
+
+  if (isProactive) {
+    pushRecentChat(living, req.characterId, 'assistant', result.dialogue, {
+      action: result.action,
+      innerThought: result.inner_thought,
+    });
+    living.lastTalkAt[req.characterId] = Date.now();
+    archivePlayerTurn(
+      req.characterId,
+      req.turnMode === 'outfit_reveal'
+        ? '（换装完成）'
+        : req.turnMode === 'continue'
+          ? '（接着说）'
+          : '（指挥官沉默·角色主动）',
+      result.dialogue,
+      req.sceneId,
+    );
+  } else {
+    pushRecentChat(living, req.characterId, 'user', req.playerMessage);
+    pushRecentChat(living, req.characterId, 'assistant', result.dialogue, {
+      action: result.action,
+      innerThought: result.inner_thought,
+    });
+    living.lastTalkAt[req.characterId] = Date.now();
+    archivePlayerTurn(req.characterId, req.playerMessage, result.dialogue, req.sceneId);
+  }
+
+  evolvePersonaAfterTalk(living, req.characterId, {
+    affectionDelta: result.affection_change ?? 0,
+    playerMessage: isProactive ? '' : req.playerMessage,
+  });
+  applyMoodImpulse(living, req.characterId, {
+    kind: 'talk',
+    affectionDelta: result.affection_change ?? 0,
+  });
+
+  if (result.affection_change) {
+    adjustAffinity(living, req.characterId, result.affection_change);
+  }
+
+  // 同屏对话：与同场同伴微增关系（AI 互动影响角色间好感）
+  const coGroup = getCoScreenGroupForCharacter(living, req.characterId);
+  if (coGroup && coGroup.memberIds.length >= 2) {
+    for (const other of coGroup.memberIds) {
+      if (other === req.characterId) continue;
+      adjustRelation(living, req.characterId, other, 1);
+    }
+  }
+
+  // 吃醋：点名角色小幅掉好感
+  if (result.trigger_jealousy?.length) {
+    for (const otherId of result.trigger_jealousy.slice(0, 3)) {
+      if (!otherId || otherId === req.characterId) continue;
+      adjustAffinity(living, otherId, -2);
+      const cur = new Set(living.characterStatus[otherId] ?? []);
+      cur.add('jealousy');
+      living.characterStatus[otherId] = [...cur].slice(0, 4) as LightStatusTag[];
+      pushMemory(living, otherId, {
+        kind: 'event',
+        summary: `因指挥官与${req.characterId}的互动而吃味`,
+        importance: 3,
+      });
+    }
+  }
+
+  if (result.status_changes?.length) {
+    const cur = new Set(living.characterStatus[req.characterId] ?? []);
+    for (const s of result.status_changes) {
+      cur.add(s as LightStatusTag);
+    }
+    living.characterStatus[req.characterId] = [...cur].slice(0, 4) as LightStatusTag[];
+  }
+
+  // 小黑屋：记录 valence、解除姿势等待、消费 justEntered；非调教时消费 justLeft / AI 明确求进
+  if (isDisciplineActiveFor(living, req.characterId)) {
+    recordDisciplineValenceHint(living, req.characterId, result.discipline_valence as 'tragic' | 'mixed' | 'joyful' | undefined);
+    clearDisciplinePoseAwaiting(living, req.characterId);
+    consumeDisciplineJustEntered(living, req.characterId);
+    if (result.skin_change) {
+      result = { ...result, skin_change: '' };
+    }
+  } else {
+    consumeDisciplineJustLeftTurn(living, req.characterId);
+    if (
+      liveSave &&
+      (req.turnMode ?? 'reply') !== 'outfit_reveal'
+    ) {
+      maybeProposeDisciplineInvite(liveSave, living, req.characterId, result.dialogue);
+    }
+  }
+
+  const factAsk =
+    !isProactive &&
+    /[?？]|还记得|上次|昨天|之前|名字|喜欢|讨厌|害怕|约定|告诉/.test(req.playerMessage);
+  pushMemory(living, req.characterId, {
+    kind: 'talk',
+    summary: isProactive
+      ? `主动开口：「${result.dialogue.slice(0, 72)}」${
+          result.end_conversation ? `｜结束：${result.end_reason || '收束'}` : ''
+        }`
+      : `玩家：「${req.playerMessage.slice(0, 56)}」→「${result.dialogue.slice(0, 56)}」${
+          result.end_conversation ? `｜结束：${result.end_reason || '收束'}` : ''
+        }`,
+    importance: factAsk ? 7 : result.end_conversation ? 6 : isProactive ? 4 : 5,
+  });
+
+  // 玩家交代跑腿且角色答应 → 锁定受保护议程，避免关对话后立刻另起无关主动消息
+  if (
+    !isProactive &&
+    tryCommitPlayerTaskAgenda(living, req.characterId, req.playerMessage, result.dialogue)
+  ) {
+    pushMemory(living, req.characterId, {
+      kind: 'talk',
+      summary: `已答应指挥官交代的事，正在办理中：${req.playerMessage.slice(0, 48)}`,
+      importance: 9,
+    });
+    pushCampLog(living, {
+      text: `${CHARACTER_MAP[req.characterId]?.name ?? req.characterId} 去办指挥官交代的事了`,
+      source: 'npc',
+      characterIds: [req.characterId],
+    });
+  }
+
+  if (result.end_conversation) {
+    pushCampLog(living, {
+      text: `${req.characterId} 结束了对谈${result.end_reason ? `（${result.end_reason}）` : ''}`,
+      source: 'npc',
+      characterIds: [req.characterId],
+    });
+  }
+
+  if (result.interrupt_reaction === 'annoyed' || result.interrupt_reaction === 'angry') {
+    const cur = new Set(living.characterStatus[req.characterId] ?? []);
+    const tag: LightStatusTag =
+      result.interrupt_reaction === 'angry' ? 'anxiety_state' : 'fatigue';
+    cur.add(tag);
+    living.characterStatus[req.characterId] = [...cur].slice(0, 4) as LightStatusTag[];
+    // 模型未扣好感时给保底惩罚（性格仍可通过 LLM 的 affection_change 放大）
+    const floor = result.interrupt_reaction === 'angry' ? -4 : -2;
+    if ((result.affection_change ?? 0) > floor) {
+      const extra = floor - (result.affection_change ?? 0);
+      adjustAffinity(living, req.characterId, extra);
+      result = { ...result, affection_change: floor };
+    }
+    if (isDeepSleeping(living, req.characterId)) {
+      markSleepDisturbed(
+        living,
+        req.characterId,
+        result.interrupt_reaction === 'angry' ? '睡觉被吵醒后很生气' : '睡觉被吵醒后很烦/疲惫',
+      );
+    }
+  }
+
+  // 睡眠中主动惊醒 / 对白决定起床
+  {
+    const speech = `${result.dialogue ?? ''} ${result.action ?? ''} ${result.end_reason ?? ''}`;
+    if (tryWakeFromSpeech(living, req.characterId, speech)) {
+      /* 已脱离睡眠 → 睡衣站立 */
+    } else if (
+      isDeepSleeping(living, req.characterId) &&
+      result.end_conversation &&
+      /睡|醒|吵|休息|困/.test(speech)
+    ) {
+      leaveSleepSystem(living, req.characterId, {
+        reason: result.end_reason || '被打扰后决定不再睡',
+        completed: false,
+      });
+    }
+  }
+
+  if (
+    req.turnMode !== 'outfit_reveal' &&
+    (result.skin_change ||
+      /换(上|好|完|衣服)|私服|泳装|睡衣/.test(
+        `${result.dialogue}${result.action ?? ''}${req.playerMessage}`,
+      ))
+  ) {
+    const skinR = processTurnOutfitChange(liveSave, living, req.characterId, result, {
+      playerMessage: req.playerMessage,
+      dialogue: result.dialogue,
+      action: result.action,
+    });
+    if (skinR.msg) {
+      pushMemory(living, req.characterId, {
+        kind: 'event',
+        summary: `换装过程：${skinR.msg}`,
+        importance: 4,
+      });
+      console.info(`[outfit-process] ${req.characterId}: ${skinR.msg}`);
+    }
+    if (skinR.suppressContinue) {
+      result = { ...result, want_continue: false };
+    }
+  }
+
+  // 先处理脱巾门控（须与本轮对白一致），再跟嘴走定地点/皮肤
+  {
+    const bathR = applyBathIntimateConsentFromAi(
+      living,
+      req.characterId,
+      result.bath_intimate_consent,
+      {
+        playerMessage: req.playerMessage,
+        dialogue: result.dialogue,
+        action: result.action,
+      },
+    );
+    if (bathR.changed || bathR.consented) {
+      if (bathR.changed) {
+        pushMemory(living, req.characterId, {
+          kind: 'event',
+          summary: bathR.consented
+            ? `洗浴互动：脱掉浴巾（成人动态${bathR.source === 'infer' ? '·对白推断' : ''}）`
+            : '洗浴互动：仍裹/重新裹浴巾（立绘回冲澡待机）',
+          importance: 5,
+        });
+      }
+      if (bathR.consented) {
+        applyBatheShowerSkins(liveSave, living);
+      }
+      result = {
+        ...result,
+        bath_intimate_consent: bathR.consented,
+      };
+    }
+  }
+
+  {
+    const worldR = syncDialogueWorldRealtime(liveSave, living, req.characterId, {
+      dialogue: result.dialogue,
+      action: result.action,
+      scene_beat: result.scene_beat,
+      world_intent: result.world_intent,
+    });
+    if (worldR.msg) {
+      console.info(`[world-sync] ${req.characterId}: ${worldR.msg}`);
+    }
+    saveManager.mutate((d) => {
+      d.aiLiving = living;
+    });
+    opts?.onWorldSynced?.();
+  }
+
+  if (result.desire_next) {
+    const d = applyDesireNextFromDialogue(living, req.characterId, result.desire_next, {
+      presentSpeech: `${result.dialogue} ${result.action ?? ''} ${result.inner_thought ?? ''} ${result.scene_beat ?? ''}`,
+    });
+    if (d.ok) {
+      console.info(`[desire_next] ${req.characterId}: ${d.msg}`);
+    }
+  }
+
+  // 对话收束：挂起欲望才开始走路（此刻画面已由对白锁死）
+  if (result.end_conversation) {
+    const committed = commitPendingDesireAfterDialogue(living, req.characterId);
+    if (committed.ok) {
+      console.info(`[desire-commit] ${req.characterId}: ${committed.msg}`);
+    }
+  }
+
+  saveManager.mutate((d) => {
+    d.aiLiving = living;
+  });
+  opts?.onWorldSynced?.();
+
+  if (living.pendingItemOffer?.toCharacterId === req.characterId) {
+    const campAction =
+      result.camp_item_action && typeof result.camp_item_action === 'object'
+        ? (result.camp_item_action as CampItemActionPayload)
+        : null;
+    const pendingSettle = settlePendingItemOffer(
+      liveSave,
+      living,
+      req.characterId,
+      campAction,
+      result.dialogue,
+      result.item_offer_resolution,
+    );
+    if (pendingSettle.handled) {
+      if (pendingSettle.msg) {
+        result = {
+          ...result,
+          camp_item_result: pendingSettle.ok
+            ? pendingSettle.msg
+            : `失败：${pendingSettle.msg}`,
+        };
+        if (!pendingSettle.ok) {
+          pushMemory(living, req.characterId, {
+            kind: 'event',
+            summary: `道具动作失败：${pendingSettle.msg}`,
+            importance: 4,
+          });
+        }
+      }
+    }
+  } else if (result.camp_item_action && typeof result.camp_item_action === 'object') {
+    const eco = applyCampItemAction(
+      liveSave,
+      living,
+      req.characterId,
+      result.camp_item_action as CampItemActionPayload,
+    );
+    if (eco.msg) {
+      result = { ...result, camp_item_result: eco.ok ? eco.msg : `失败：${eco.msg}` };
+      if (!eco.ok) {
+        pushMemory(living, req.characterId, {
+          kind: 'event',
+          summary: `道具动作失败：${eco.msg}`,
+          importance: 4,
+        });
+      }
+    }
+  }
+
+  if (result.memory_write) {
+    pushMemory(living, req.characterId, {
+      kind: 'talk',
+      summary: result.memory_write,
+      importance: 7,
+    });
+  } else if (result.scene_beat) {
+    pushMemory(living, req.characterId, {
+      kind: 'talk',
+      summary: `节拍：${result.scene_beat}`,
+      importance: 4,
+    });
+  }
+
+  ingestFactsFromDialogueTurn(living, req.characterId, {
+    playerMessage: req.playerMessage,
+    dialogue: result.dialogue,
+    memoryWrite: result.memory_write,
+  });
+
+    return result;
+  } finally {
+    // Only the request that still owns this character may clear the lease.
+    opts?.signal?.removeEventListener('abort', abortFromCaller);
+    finishDialogueRequest(lease);
+  }
+}
+
+export type NpcPairResult = {
+  lines: { characterId: string; emotion: string; dialogue: string }[];
+  summary: string;
+  relation_change?: number;
+};
+
+export async function runNpcPairEvent(
+  living: AiLivingSave,
+  a: string,
+  b: string,
+  sceneId: string,
+  save?: SaveData | null,
+  motive?: string,
+): Promise<NpcPairResult> {
+  const liveSave = save ?? saveManager.get();
+  const { system, user } = assembleNpcPairMessages(living, a, b, sceneId, liveSave, motive);
+  const raw = await chatJsonRouted<NpcPairResult>(
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    { channel: 'dialogue', maxTokens: 500 },
+  );
+
+  const lines = Array.isArray(raw.lines) ? raw.lines : [];
+  const summary = raw.summary || `${a} 与 ${b} 短暂交谈`;
+  const delta = typeof raw.relation_change === 'number' ? raw.relation_change : 1;
+  adjustRelation(living, a, b, delta);
+
+  pushCampLog(living, {
+    text: summary,
+    source: 'npc',
+    characterIds: [a, b],
+  });
+  pushMemory(living, a, { kind: 'event', summary, importance: 3 });
+  pushMemory(living, b, { kind: 'event', summary, importance: 3 });
+  archiveNpcTurn(a, b, lines, sceneId, summary);
+
+  return { lines, summary, relation_change: delta };
+}

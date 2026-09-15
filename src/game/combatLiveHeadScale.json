@@ -1,0 +1,21 @@
+{
+  "refHeadFracCanvas": 0.05234,
+  "scaleMin": 0.72,
+  "scaleMax": 1.35,
+  "byStem": {
+    "SR01_2": { "headFracCanvas": 0.05812, "scaleMul": 0.9008, "bodyFrac": 0.212 },
+    "SR01_3": { "headFracCanvas": 0.05078, "scaleMul": 1.0308, "bodyFrac": 0.182 },
+    "SR02_1": { "headFracCanvas": 0.05078, "scaleMul": 1.0308, "bodyFrac": 0.18 },
+    "SR03_1": { "headFracCanvas": 0.05044, "scaleMul": 1.0376, "bodyFrac": 0.179 },
+    "SR04_1": { "headFracCanvas": 0.05234, "scaleMul": 1.0, "bodyFrac": 0.185 },
+    "SR05_1": { "headFracCanvas": 0.04844, "scaleMul": 1.0806, "bodyFrac": 0.173 },
+    "SSR01_1": { "headFracCanvas": 0.05312, "scaleMul": 0.9853, "bodyFrac": 0.204 },
+    "SSR02_1": { "headFracCanvas": 0.05428, "scaleMul": 0.9644, "bodyFrac": 0.181 },
+    "SSR03_1": { "headFracCanvas": 0.05156, "scaleMul": 1.0152, "bodyFrac": 0.187 },
+    "SSR04_1": { "headFracCanvas": 0.05625, "scaleMul": 0.9306, "bodyFrac": 0.227 },
+    "SSR05_1": { "headFracCanvas": 0.06562, "scaleMul": 0.7976, "bodyFrac": 0.216 },
+    "UR03_1": { "headFracCanvas": 0.05078, "scaleMul": 1.0308, "bodyFrac": 0.181 },
+    "UR04_1": { "headFracCanvas": 0.05344, "scaleMul": 0.9802, "bodyFrac": 0.209 }
+  },
+  "source": "combat-scene-debugHeadCal pass1; verified pass2 head% 5.16–5.39"
+}

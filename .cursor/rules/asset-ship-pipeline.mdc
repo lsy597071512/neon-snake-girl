@@ -1,0 +1,14 @@
+---
+description: 打包必须执行美术 ship 强制流程
+alwaysApply: true
+---
+
+# 美术进包强制标准
+
+打包 / Android APK 必须遵循 `docs/asset-ship-pipeline.md`：
+
+1. 源 `tex/` 只读，产物只进 `tex-ship/` → `dist/tex/`
+2. `npm run build` / `build:apk` / `cap:sync` 已内置 build-ship + 门禁；不得绕过
+3. 已优化资源（缓存命中）不得二次压缩；改规格须升 `SHIP_POLICY_VERSION`（当前 P2：`2026-08-23-p2-mobile-v2`）
+4. 减弱优化或换平台前须用户明确授权，并先更新 `docs/asset-ship-pipeline.md`
+5. 打包优化仅改 `scripts/` 与 `tex-ship/`，**禁止**为压缩修改 `src/` 玩法逻辑或资源路径

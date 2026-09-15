@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 允许 HTTP 访问家里 Ollama（局域网 / Tailscale 100.x）。公网请优先 HTTPS 隧道。 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

@@ -1,0 +1,464 @@
+/* Gal 剧情层 + 新手引导坞 */
+
+.story-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  pointer-events: auto;
+  background: #07090e;
+}
+
+.story-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-color: #0a0c10;
+  background-position: center top;
+  background-size: cover;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+
+.story-stage {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.story-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(6, 8, 12, 0.35) 0%, rgba(6, 8, 12, 0.72) 55%, rgba(6, 8, 12, 0.92) 100%);
+}
+
+.story-veil--on-plate {
+  background: linear-gradient(180deg, rgba(6, 8, 12, 0.22) 0%, rgba(6, 8, 12, 0.55) 48%, rgba(6, 8, 12, 0.88) 100%);
+}
+
+.story-portraits {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 6%;
+  height: 58%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.4rem;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.38s ease;
+}
+
+.story-portraits.is-visible {
+  opacity: 1;
+}
+
+.story-portraits.is-fading-out,
+.story-portraits.is-fading-in {
+  opacity: 0;
+}
+
+.story-overlay.is-closing {
+  transition: opacity 0.38s ease;
+  opacity: 0;
+}
+
+.story-portrait {
+  flex: 1 1 0;
+  max-width: 52%;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  opacity: 1;
+  transition: opacity 0.38s ease, transform 0.38s ease;
+}
+
+.story-portrait.is-enter {
+  animation: story-portrait-enter 0.42s ease both;
+}
+
+@keyframes story-portrait-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.story-portrait.is-dim {
+  opacity: 0.45;
+  transform: scale(0.92);
+}
+
+.story-portrait.is-active {
+  opacity: 1;
+  transform: scale(1);
+  z-index: 2;
+}
+
+.story-portrait.is-dim.is-enter,
+.story-portrait.is-active.is-enter {
+  animation: story-portrait-enter 0.42s ease both;
+}
+
+.story-portrait-frame {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.story-portrait-video,
+.story-portrait-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center top;
+  transform: scale(1.48) translateY(10%);
+  transform-origin: center top;
+  pointer-events: none;
+}
+
+/* 指挥官小机体：全身可见，少裁顶 */
+.story-portrait--commander {
+  max-width: 42%;
+  align-self: flex-end;
+}
+
+.story-portrait--commander .story-portrait-img {
+  object-position: center bottom;
+  transform: scale(1.08) translateY(0);
+  transform-origin: center bottom;
+}
+
+.story-portrait-fallback {
+  font-size: 3rem;
+  align-items: center;
+}
+
+.story-skip {
+  position: absolute;
+  top: max(0.75rem, env(safe-area-inset-top));
+  right: 0.75rem;
+  z-index: 5;
+  width: auto;
+  min-width: 5.5rem;
+  min-height: 2.2rem;
+  padding: 0.2rem 0.8rem;
+}
+
+.story-dock {
+  position: relative;
+  z-index: 3;
+  padding: 0 0.45rem calc(0.7rem + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.story-box {
+  position: relative;
+  min-height: 8.2rem;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+  display: grid;
+}
+
+.story-box .wl-sub-panel-frame {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+}
+
+.story-box-body {
+  grid-area: 1 / 1;
+  position: relative;
+  z-index: 1;
+  padding: 0.9rem 1.15rem 1.45rem 1.2rem;
+}
+
+.story-name {
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #f0d7b0;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
+  margin-bottom: 0.3rem;
+}
+
+.story-name.is-hidden {
+  display: none;
+}
+
+.story-text {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+  font-size: 0.94rem;
+  color: #f4eee6;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  min-height: 3.2em;
+}
+
+.story-caret {
+  position: absolute;
+  right: 1.05rem;
+  bottom: 0.55rem;
+  font-size: 0.7rem;
+  color: #e8c48a;
+  animation: story-caret-blink 1s steps(2, end) infinite;
+}
+
+.story-caret.is-hidden {
+  display: none;
+}
+
+@keyframes story-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.story-choices,
+.story-confirm-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.story-choices.is-hidden,
+.story-confirm-row.is-hidden {
+  display: none;
+}
+
+.story-ui-btn {
+  position: relative;
+  width: 100%;
+  min-height: 2.7rem;
+  border: none;
+  background: transparent;
+  color: #f4eee6;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+
+.story-ui-btn .btn-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+}
+
+.story-ui-btn .btn-text {
+  position: relative;
+  z-index: 1;
+  padding: 0.45rem 0.85rem;
+  display: block;
+}
+
+.story-choice-btn .btn-text {
+  text-align: left;
+}
+
+.story-confirm-btn .btn-text {
+  text-align: center;
+}
+
+/* 引导坞：默认不拦截点击，仅确认钮可点；底下 UI 可穿透操作 */
+.story-guide-dock {
+  position: fixed;
+  left: 50%;
+  bottom: calc(4.6rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(94vw, 430px);
+  z-index: 9000;
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 0.5rem 0.6rem;
+  padding: 0.7rem 0.8rem 0.75rem;
+  pointer-events: none;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  max-height: min(34vh, 220px);
+}
+
+.story-guide-frame {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+}
+
+.story-guide-art,
+.story-guide-body {
+  position: relative;
+  z-index: 1;
+  grid-row: 1;
+  pointer-events: none;
+}
+
+.story-guide-dock.is-hidden {
+  display: none;
+}
+
+.story-guide-art {
+  grid-column: 1;
+  width: 64px;
+  height: 64px;
+  align-self: center;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.story-guide-body {
+  grid-column: 2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.story-guide-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  transform: scale(1.35) translateY(6%);
+  animation: story-guide-art-in 0.45s ease both;
+}
+
+@keyframes story-guide-art-in {
+  from {
+    opacity: 0;
+    transform: scale(1.2) translateY(10%);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1.35) translateY(6%);
+  }
+}
+
+.story-guide-name {
+  font-size: 0.75rem;
+  color: #f0d7b0;
+  font-weight: 800;
+}
+
+.story-guide-text {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #f4eee6;
+  max-height: 5.8em;
+  overflow: auto;
+  pointer-events: auto;
+}
+
+.story-guide-actions {
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: auto;
+}
+
+.story-guide-confirm {
+  position: relative;
+  min-width: 6.2rem;
+  min-height: 2.2rem;
+  border: none;
+  background: transparent;
+  overflow: hidden;
+}
+
+.story-guide-confirm .btn-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+}
+
+.story-guide-confirm .btn-text {
+  position: relative;
+  z-index: 1;
+  color: #f4eee6;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.wl-avatar-inner--empty {
+  background: rgba(8, 10, 14, 0.55);
+}
+
+/* 高亮脉冲 */
+.story-guide-highlight {
+  position: relative !important;
+  z-index: 9100 !important;
+  box-shadow: 0 0 0 2px rgba(0, 229, 255, 0.95), 0 0 18px rgba(0, 229, 255, 0.55) !important;
+  animation: story-guide-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes story-guide-pulse {
+  50% {
+    box-shadow: 0 0 0 3px rgba(0, 229, 255, 1), 0 0 26px rgba(0, 229, 255, 0.75);
+  }
+}
+
+.hub-char-zone-commander {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+}
+
+.hub-commander-portrait {
+  width: min(42vw, 220px);
+  height: auto;
+  max-height: 55vh;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
+}
+
+.wl-nav-tab.is-locked {
+  position: relative;
+  opacity: 0.45;
+}
+
+.wl-nav-tab.is-locked::after {
+  content: '锁';
+  position: absolute;
+  top: 0.15rem;
+  right: 0.35rem;
+  font-size: 0.55rem;
+  color: var(--warn, #ffb020);
+}

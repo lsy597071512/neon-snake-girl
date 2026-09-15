@@ -1,0 +1,16 @@
+name = "rust-belt-license"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+
+# D1 ??????????????#   npx wrangler d1 create rust-belt-license
+# ?????? database_id ????????????
+#   npx wrangler d1 execute rust-belt-license --remote --file=schema.sql
+# ??????????????????
+#   npx wrangler secret put LICENSE_SECRET
+#   npx wrangler secret put ADMIN_KEY
+
+[[d1_databases]]
+binding = "DB"
+database_name = "rust-belt-license"
+database_id = "05bde126-b979-4fdf-9a5a-dff5fc5ad576"
+

@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>锈带纪元 · 战斗面片 / 背景预览</title>
+    <link rel="icon" href="./favicon.svg" />
+    <style>
+      :root {
+        --bg: #12141a;
+        --panel: #1a1f2a;
+        --line: #2c3444;
+        --text: #e8ecf4;
+        --muted: #9aa3b5;
+        --accent: #e2b56a;
+        --ok: #6bcf8e;
+        --checker-a: #2a303c;
+        --checker-b: #1e2430;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        background: radial-gradient(1200px 600px at 18% -8%, #243049, var(--bg));
+        color: var(--text);
+        min-height: 100vh;
+      }
+      header {
+        padding: 20px 24px 8px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(18, 20, 26, 0.85);
+        backdrop-filter: blur(8px);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      h1 {
+        margin: 0 0 6px;
+        font-size: 22px;
+        font-weight: 650;
+      }
+      .sub {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+        margin: 0 0 14px;
+      }
+      .tabs {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .tab {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        padding: 8px 14px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .tab.active {
+        border-color: var(--accent);
+        color: var(--accent);
+        box-shadow: inset 0 0 0 1px rgba(226, 181, 106, 0.35);
+      }
+      main {
+        padding: 20px 24px 48px;
+        max-width: 1280px;
+        margin: 0 auto;
+      }
+      section {
+        margin-bottom: 28px;
+      }
+      h2 {
+        margin: 0 0 12px;
+        font-size: 16px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      h2 .hint {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 400;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+      @media (max-width: 900px) {
+        .grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 560px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+        cursor: zoom-in;
+        transition: border-color 0.15s ease;
+      }
+      .card:hover {
+        border-color: #4a566c;
+      }
+      .card.selected {
+        border-color: var(--ok);
+        box-shadow: 0 0 0 1px rgba(107, 207, 142, 0.35);
+      }
+      .thumb {
+        aspect-ratio: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+        background-image: linear-gradient(45deg, var(--checker-a) 25%, transparent 25%),
+          linear-gradient(-45deg, var(--checker-a) 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, var(--checker-a) 75%),
+          linear-gradient(-45deg, transparent 75%, var(--checker-a) 75%);
+        background-size: 24px 24px;
+        background-position:
+          0 0,
+          0 12px,
+          12px -12px,
+          -12px 0;
+        background-color: var(--checker-b);
+      }
+      .thumb.bg {
+        aspect-ratio: 9 / 16;
+        max-height: 420px;
+        margin: 0 auto;
+        width: 100%;
+      }
+      .thumb img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+      .meta {
+        padding: 10px 12px 12px;
+        border-top: 1px solid var(--line);
+      }
+      .meta .name {
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .meta .file {
+        font-size: 11px;
+        color: var(--muted);
+        word-break: break-all;
+      }
+      .badge {
+        display: inline-block;
+        margin-top: 6px;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(107, 207, 142, 0.15);
+        color: var(--ok);
+        border: 1px solid rgba(107, 207, 142, 0.35);
+      }
+      .bg-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+      @media (max-width: 900px) {
+        .bg-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      .lightbox {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.82);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        z-index: 50;
+        cursor: zoom-out;
+      }
+      .lightbox.open {
+        display: flex;
+      }
+      .lightbox img {
+        max-width: min(92vw, 1100px);
+        max-height: 90vh;
+        object-fit: contain;
+        background-image: linear-gradient(45deg, #333 25%, transparent 25%),
+          linear-gradient(-45deg, #333 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #333 75%),
+          linear-gradient(-45deg, transparent 75%, #333 75%);
+        background-size: 28px 28px;
+        background-position:
+          0 0,
+          0 14px,
+          14px -14px,
+          -14px 0;
+        background-color: #222;
+        border-radius: 8px;
+      }
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>战斗面片 / 背景预览</h1>
+      <p class="sub">
+        棋盘格表示透明。点击卡片可放大。需用 Vite 打开（
+        <code>npm run dev</code>
+        后访问本页），以便加载
+        <code>/tex/...</code>
+        资源。
+      </p>
+      <div class="tabs" id="tabs"></div>
+    </header>
+
+    <main>
+      <div id="panels"></div>
+    </main>
+
+    <div class="lightbox" id="lightbox" title="点击关闭">
+      <img id="lightbox-img" alt="preview" />
+    </div>
+
+    <script>
+      const bust = Date.now();
+      const themes = [
+        {
+          id: 'station',
+          label: '第1章 · 零号月台',
+          selectedBg: '03-gantry.png',
+          billboards: [
+            { file: '01-tower.png', name: '月台瞭望塔' },
+            { file: '02-crane.png', name: '警戒条吊机' },
+            { file: '03-factory.png', name: '锈白厂房楼' },
+            { file: '04-containers.png', name: '集装箱堆' },
+            { file: '05-boxcar.png', name: '废弃货车厢' },
+            { file: '06-gantry.png', name: '橙色机械支腿' },
+            { file: '07-warehouse.png', name: '低矮铁皮库房' },
+            { file: '08-tank.png', name: '红亭 + 储罐' },
+            { file: '09-canopy.png', name: '月台雨棚 + 货箱' },
+          ],
+          backgrounds: [
+            { file: '01-rails.png', name: '铁轨公路纵深' },
+            { file: '02-yard.png', name: '月台货场' },
+            { file: '03-gantry.png', name: '吊机峡谷（选用）' },
+          ],
+        },
+        {
+          id: 'corridor',
+          label: '第2章 · 锈带走廊',
+          selectedBg: '03-sandstorm.png',
+          billboards: [
+            { file: '01-pylon.png', name: '数字门塔柱' },
+            { file: '02-gate.png', name: '数字门龙门架' },
+            { file: '03-crawler.png', name: '履带沙地机' },
+            { file: '04-solar.png', name: '太阳能板废墟' },
+            { file: '05-cyclone.png', name: '旋风除尘塔' },
+            { file: '06-beacon.png', name: '数据信标桅杆' },
+            { file: '07-bunker.png', name: '掩埋地堡入口' },
+            { file: '08-bladder.png', name: '软体油囊罐' },
+            { file: '09-checkpoint.png', name: '路障检查站' },
+          ],
+          backgrounds: [
+            { file: '01-gates.png', name: '沙漠公路 + 数字门' },
+            { file: '02-freight.png', name: '沙埋机械走廊' },
+            { file: '03-sandstorm.png', name: '沙暴关卡峡谷（选用）' },
+          ],
+        },
+      ];
+
+      const tabs = document.getElementById('tabs');
+      const panels = document.getElementById('panels');
+      const lightbox = document.getElementById('lightbox');
+      const lightboxImg = document.getElementById('lightbox-img');
+
+      function url(path) {
+        return `${path}?t=${bust}`;
+      }
+
+      function openLightbox(src) {
+        lightboxImg.src = src;
+        lightbox.classList.add('open');
+      }
+
+      lightbox.addEventListener('click', () => lightbox.classList.remove('open'));
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') lightbox.classList.remove('open');
+      });
+
+      function renderTheme(theme) {
+        const billboardCards = theme.billboards
+          .map((b) => {
+            const src = url(`./tex/combat/billboards/${theme.id}/${b.file}`);
+            return `
+          <article class="card" data-src="${src}">
+            <div class="thumb"><img src="${src}" alt="${b.name}" loading="lazy" /></div>
+            <div class="meta">
+              <div class="name">${b.name}</div>
+              <div class="file">${b.file}</div>
+            </div>
+          </article>`;
+          })
+          .join('');
+
+        const bgCards = theme.backgrounds
+          .map((b) => {
+            const src = url(`./tex/combat/backgrounds/${theme.id}/${b.file}`);
+            const selected = b.file === theme.selectedBg;
+            return `
+          <article class="card ${selected ? 'selected' : ''}" data-src="${src}">
+            <div class="thumb bg"><img src="${src}" alt="${b.name}" loading="lazy" /></div>
+            <div class="meta">
+              <div class="name">${b.name}</div>
+              <div class="file">${b.file}</div>
+              ${selected ? '<span class="badge">游戏内使用中</span>' : ''}
+            </div>
+          </article>`;
+          })
+          .join('');
+
+        return `
+        <div class="panel" data-theme="${theme.id}">
+          <section>
+            <h2>2D 建筑面片 <span class="hint">9 张 · 透明 PNG</span></h2>
+            <div class="grid">${billboardCards}</div>
+          </section>
+          <section>
+            <h2>竖屏背景 <span class="hint">1152×2048 · 绿框为当前选用</span></h2>
+            <div class="bg-grid">${bgCards}</div>
+          </section>
+        </div>`;
+      }
+
+      panels.innerHTML = themes.map(renderTheme).join('');
+
+      themes.forEach((theme, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'tab' + (i === 0 ? ' active' : '');
+        btn.textContent = theme.label;
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab').forEach((el) => el.classList.remove('active'));
+          btn.classList.add('active');
+          document.querySelectorAll('.panel').forEach((el) => {
+            el.classList.toggle('hidden', el.getAttribute('data-theme') !== theme.id);
+          });
+        });
+        tabs.appendChild(btn);
+      });
+
+      document.querySelectorAll('.panel').forEach((el, i) => {
+        if (i !== 0) el.classList.add('hidden');
+      });
+
+      panels.addEventListener('click', (e) => {
+        const card = e.target.closest('.card');
+        if (!card) return;
+        openLightbox(card.getAttribute('data-src'));
+      });
+    </script>
+  </body>
+</html>

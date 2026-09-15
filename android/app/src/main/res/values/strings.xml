@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">锈带纪元</string>
+    <string name="title_activity_main">锈带纪元</string>
+    <string name="package_name">com.rustbelt.era</string>
+    <string name="custom_url_scheme">com.rustbelt.era</string></resources>

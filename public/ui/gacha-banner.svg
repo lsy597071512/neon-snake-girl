@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 120" preserveAspectRatio="none">
+  <defs>
+    <linearGradient id="b" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0a1828"/>
+      <stop offset="50%" stop-color="#1a4060"/>
+      <stop offset="100%" stop-color="#0a1828"/>
+    </linearGradient>
+  </defs>
+  <path d="M0 0 H720 V90 L680 120 H40 L0 90 Z" fill="url(#b)" stroke="#2ecbff" stroke-width="1"/>
+  <text x="36" y="52" fill="#2ecbff" font-family="sans-serif" font-size="28" font-weight="bold" letter-spacing="8">构 建</text>
+  <text x="36" y="78" fill="#8ab4d0" font-family="sans-serif" font-size="14" letter-spacing="4">AWAKENING PROTOCOL</text>
+  <path d="M600 30 L680 30 L660 60 L600 60 Z" fill="#ff8c42" opacity="0.8"/>
+</svg>

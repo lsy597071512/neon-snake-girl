@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>锈带纪元 · 待机射击预览</title>
+    <link rel="icon" href="./favicon.svg" />
+    <style>
+      :root {
+        --bg: #101318;
+        --panel: #1a1f2a;
+        --line: #2c3444;
+        --text: #e8ecf4;
+        --muted: #9aa3b5;
+        --accent: #e2b56a;
+        --ok: #6bcf8e;
+        --wide: #7ab8ff;
+        --closed: #f0a0c8;
+        --checker-a: #2a303c;
+        --checker-b: #1e2430;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        background: radial-gradient(1200px 600px at 18% -8%, #243049, var(--bg));
+        color: var(--text);
+        min-height: 100vh;
+      }
+      header {
+        padding: 18px 24px 12px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(16, 19, 24, 0.9);
+        backdrop-filter: blur(8px);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      h1 { margin: 0 0 6px; font-size: 22px; font-weight: 650; }
+      .sub { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 12px; }
+      .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      button, .tab {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        padding: 8px 14px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      button.active, .tab.active {
+        border-color: var(--accent);
+        color: var(--accent);
+        box-shadow: inset 0 0 0 1px rgba(226, 181, 106, 0.35);
+      }
+      main { padding: 20px 24px 48px; max-width: 1480px; margin: 0 auto; }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+        gap: 14px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .stage {
+        aspect-ratio: 9 / 16;
+        position: relative;
+        background-color: var(--checker-b);
+        background-image:
+          linear-gradient(45deg, var(--checker-a) 25%, transparent 25%),
+          linear-gradient(-45deg, var(--checker-a) 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, var(--checker-a) 75%),
+          linear-gradient(-45deg, transparent 75%, var(--checker-a) 75%);
+        background-size: 22px 22px;
+        background-position: 0 0, 0 11px, 11px -11px, -11px 0;
+      }
+      body.bg-black .stage { background: #000; }
+      body.bg-road .stage {
+        background:
+          linear-gradient(180deg, rgba(10, 14, 22, 0.15), rgba(10, 14, 22, 0.55)),
+          url('./tex/combat/backgrounds/station/03-gantry.png') center / cover no-repeat,
+          #1a2230;
+      }
+      .stage video, .stage img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+      .stage img.lock { display: none; }
+      body.show-lock .stage video { display: none; }
+      body.show-lock .stage img.lock { display: block; }
+      .meta { padding: 10px 12px 12px; border-top: 1px solid var(--line); }
+      .name { font-size: 14px; font-weight: 650; }
+      .file { font-size: 11px; color: var(--muted); margin-top: 3px; word-break: break-all; }
+      .badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+      .badge {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+      }
+      .badge.closed { background: rgba(240, 160, 200, 0.14); color: var(--closed); border-color: rgba(240, 160, 200, 0.35); }
+      .badge.wide { background: rgba(122, 184, 255, 0.14); color: var(--wide); border-color: rgba(122, 184, 255, 0.35); }
+      .badge.kneel { background: rgba(226, 181, 106, 0.14); color: var(--accent); border-color: rgba(226, 181, 106, 0.35); }
+      .err { color: #ff8b8b; font-size: 12px; padding: 8px 12px; display: none; }
+      .card.fail .err { display: block; }
+      .card.fail video { opacity: 0.25; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>战斗背影 · 待机射击预览</h1>
+      <p class="sub">
+        13 条 <code>*_pifu00_shoot_idle.webm</code> · 黑底半透。棋盘格看抠像，切「关卡底」看合成。Chrome 最佳。
+      </p>
+      <div class="toolbar">
+        <button type="button" id="btn-play" class="active">循环播放</button>
+        <button type="button" id="btn-lock">对照锁图</button>
+        <button type="button" id="bg-check" class="active">棋盘格</button>
+        <button type="button" id="bg-black">纯黑</button>
+        <button type="button" id="bg-road">关卡底</button>
+      </div>
+    </header>
+    <main>
+      <div class="grid" id="grid"></div>
+    </main>
+    <script>
+      const CHARACTERS = [
+        { id: 'ashcrow', name: '苍羽·澪', stem: 'SR01_2', stance: 'closed', crouch: 'half_kneel_claw_closed' },
+        { id: 'heartforge', name: '白楯·芹奈', stem: 'SR02_1', stance: 'closed', crouch: 'soft_knees_together' },
+        { id: 'mirror', name: '银绯·玲', stem: 'SR03_1', stance: 'wide', crouch: 'sniper_sit_wide' },
+        { id: 'neoncoil', name: '苍斩·凛', stem: 'SR01_3', stance: 'closed', crouch: 'compact_heels_closed' },
+        { id: 'prismrift', name: '焰甲·朱里', stem: 'SR04_1', stance: 'wide', crouch: 'heavy_cannon_brace' },
+        { id: 'wireguard', name: '黄狐·萤', stem: 'SR05_1', stance: 'wide', crouch: 'alert_fox_wide' },
+        { id: 'frostline', name: '夜爪·黑织', stem: 'SSR01_1', stance: 'closed', crouch: 'half_kneel_predator_closed' },
+        { id: 'pulse', name: '翠翼·铃', stem: 'SSR02_1', stance: 'wide', crouch: 'bounce_ready_wide' },
+        { id: 'dustblade', name: '绯尾·椿', stem: 'SSR04_1', stance: 'closed', crouch: 'hunter_knees_closed' },
+        { id: 'ironrain', name: '橙铠·琥珀', stem: 'SSR05_1', stance: 'wide', crouch: 'overheat_brace_wide' },
+        { id: 'skyshard', name: '冰华·雫', stem: 'SSR03_1', stance: 'closed', crouch: 'shy_ice_closed' },
+        { id: 'stellar', name: '光轮·天音', stem: 'UR03_1', stance: 'closed', crouch: 'half_kneel_judgment_closed' },
+        { id: 'outercore', name: '橙兔·美羽', stem: 'UR04_1', stance: 'closed', crouch: 'cute_bunny_closed' },
+      ];
+      const t = Date.now();
+      const grid = document.getElementById('grid');
+      grid.innerHTML = CHARACTERS.map((c) => {
+        const webm = `./tex/juese/combat-back/${c.stem}_pifu00_shoot_idle.webm?t=${t}`;
+        const lock = `./tex/juese/combat-back/locks/${c.stem}_pifu00_shoot_lock.png?t=${t}`;
+        const kneel = c.crouch.startsWith('half_kneel');
+        return `<article class="card" data-stem="${c.stem}">
+          <div class="stage">
+            <video muted loop playsinline autoplay preload="auto" src="${webm}"></video>
+            <img class="lock" src="${lock}" alt="${c.stem} lock" />
+          </div>
+          <div class="meta">
+            <div class="name">${c.name}</div>
+            <div class="file">${c.stem}_pifu00_shoot_idle.webm</div>
+            <div class="badges">
+              <span class="badge ${c.stance}">${c.stance}</span>
+              ${kneel ? '<span class="badge kneel">半跪</span>' : ''}
+            </div>
+          </div>
+          <div class="err">视频加载失败</div>
+        </article>`;
+      }).join('');
+
+      grid.querySelectorAll('video').forEach((v) => {
+        v.addEventListener('error', () => v.closest('.card').classList.add('fail'));
+        v.play().catch(() => {});
+      });
+
+      const btnPlay = document.getElementById('btn-play');
+      const btnLock = document.getElementById('btn-lock');
+      btnPlay.addEventListener('click', () => {
+        document.body.classList.remove('show-lock');
+        btnPlay.classList.add('active');
+        btnLock.classList.remove('active');
+        grid.querySelectorAll('video').forEach((v) => v.play().catch(() => {}));
+      });
+      btnLock.addEventListener('click', () => {
+        document.body.classList.add('show-lock');
+        btnLock.classList.add('active');
+        btnPlay.classList.remove('active');
+      });
+      const bgBtns = {
+        'bg-check': '',
+        'bg-black': 'bg-black',
+        'bg-road': 'bg-road',
+      };
+      Object.entries(bgBtns).forEach(([id, cls]) => {
+        document.getElementById(id).addEventListener('click', () => {
+          document.body.classList.remove('bg-black', 'bg-road');
+          if (cls) document.body.classList.add(cls);
+          Object.keys(bgBtns).forEach((k) => document.getElementById(k).classList.toggle('active', k === id));
+        });
+      });
+    </script>
+  </body>
+</html>

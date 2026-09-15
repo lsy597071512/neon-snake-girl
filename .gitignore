@@ -1,0 +1,51 @@
+node_modules/
+dist/
+dist-backups/
+tex-ship/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+.dashscope_key
+
+# Capacitor / Android
+android/.gradle/
+android/.idea/
+android/local.properties
+android/app/build/
+android/build/
+android/capacitor-cordova-android-plugins/build/
+*.apk
+*.aab
+
+# Keystore（切勿提交）
+*.jks
+*.keystore
+
+gateway/.secrets.local.json
+gradle-build.log
+
+# ===== GitHub 推送排除（2026-09-15）=====
+# 原始美术资产 6.45GB（含 >100MB 视频，超 GitHub 限制），走本地备份/Release 分发
+tex/
+# 本地大模型
+ollama/
+# 激活码（敏感，严禁入库）
+codes.txt
+# 本地工作目录与产物
+.workbuddy/
+output/
+tmp/
+tmp-bug6/
+.tmp-*/
+_combat_sync_*/
+artifacts/
+scripts/__pycache__/
+*.pyc
+# 备份残留
+*.bak_*
+*.bak_before_*
+# 临时杂项
+_count.mjs
+_tmp_*

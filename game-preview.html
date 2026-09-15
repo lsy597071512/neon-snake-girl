@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>锈带纪元 · 游戏资源预览</title>
+    <link rel="icon" href="./favicon.svg" />
+    <style>
+      :root {
+        --bg: #0e1118;
+        --panel: #171d2a;
+        --line: #2a3344;
+        --text: #e8ecf4;
+        --muted: #95a0b4;
+        --accent: #e2b56a;
+        --ok: #6bcf8e;
+        --checker-a: #2a303c;
+        --checker-b: #1e2430;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        background: radial-gradient(1100px 560px at 18% -12%, #243049, var(--bg));
+        color: var(--text);
+        min-height: 100vh;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        padding: 18px 24px 14px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(14, 17, 24, 0.9);
+        backdrop-filter: blur(10px);
+      }
+      h1 {
+        margin: 0 0 6px;
+        font-size: 22px;
+        font-weight: 650;
+      }
+      .sub {
+        margin: 0 0 14px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .sub a {
+        color: var(--accent);
+      }
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .tab {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        padding: 8px 14px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .tab.active {
+        border-color: var(--accent);
+        color: var(--accent);
+        box-shadow: inset 0 0 0 1px rgba(226, 181, 106, 0.35);
+      }
+      main {
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 20px 24px 56px;
+      }
+      .panel {
+        display: none;
+      }
+      .panel.active {
+        display: block;
+      }
+      h2 {
+        margin: 0 0 6px;
+        font-size: 16px;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 12px;
+        margin: 0 0 14px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 14px;
+      }
+      .grid.portrait-dense {
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+        cursor: zoom-in;
+        transition: border-color 0.15s ease;
+      }
+      .card:hover {
+        border-color: #4a566c;
+      }
+      .card.selected {
+        border-color: var(--ok);
+      }
+      .thumb {
+        aspect-ratio: 9 / 16;
+        background: #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+      .thumb.square {
+        aspect-ratio: 1;
+        background-color: var(--checker-b);
+        background-image: linear-gradient(45deg, var(--checker-a) 25%, transparent 25%),
+          linear-gradient(-45deg, var(--checker-a) 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, var(--checker-a) 75%),
+          linear-gradient(-45deg, transparent 75%, var(--checker-a) 75%);
+        background-size: 22px 22px;
+        background-position:
+          0 0,
+          0 11px,
+          11px -11px,
+          -11px 0;
+        padding: 10px;
+      }
+      .thumb.land {
+        aspect-ratio: 16 / 9;
+      }
+      .thumb img,
+      .thumb video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+        background: #000;
+      }
+      .thumb.square img {
+        object-fit: contain;
+        max-height: 100%;
+      }
+      .meta {
+        padding: 10px 12px 12px;
+        border-top: 1px solid var(--line);
+      }
+      .meta .name {
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .meta .file {
+        font-size: 11px;
+        color: var(--muted);
+        word-break: break-all;
+      }
+      .badge {
+        display: inline-block;
+        margin-top: 6px;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(107, 207, 142, 0.15);
+        color: var(--ok);
+        border: 1px solid rgba(107, 207, 142, 0.35);
+      }
+      .char-block {
+        margin-bottom: 28px;
+      }
+      .char-block h3 {
+        margin: 0 0 10px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .pair {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      @media (max-width: 700px) {
+        .pair {
+          grid-template-columns: 1fr;
+        }
+      }
+      .lightbox {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.88);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 50;
+        padding: 20px;
+        cursor: zoom-out;
+      }
+      .lightbox.open {
+        display: flex;
+      }
+      .lightbox img,
+      .lightbox video {
+        max-width: min(92vw, 1100px);
+        max-height: 90vh;
+        object-fit: contain;
+        border-radius: 8px;
+        background: #111;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 8px;
+      }
+      .links a {
+        display: inline-block;
+        padding: 10px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        text-decoration: none;
+        font-size: 13px;
+      }
+      .links a:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>锈带纪元 · 游戏资源预览</h1>
+      <p class="sub">
+        需用 Vite 打开（
+        <code>npm run preview:game</code>
+        ）。专项页：
+        <a href="./title-poster-preview.html">主页海报</a>
+        ·
+        <a href="./combat-billboard-preview.html">战斗面片</a>
+        ·
+        <a href="./ai-living-preview.html">AI 营地</a>
+      </p>
+      <div class="tabs" id="tabs"></div>
+    </header>
+
+    <main id="panels"></main>
+
+    <div class="lightbox" id="lb" title="点击关闭">
+      <img id="lb-img" alt="" hidden />
+      <video id="lb-vid" controls playsinline hidden></video>
+    </div>
+
+    <script>
+      const bust = Date.now();
+      const u = (p) => `${p}?t=${bust}`;
+
+      const CHARACTERS = [
+        { id: 'ashcrow', name: '苍羽·澪' },
+        { id: 'heartforge', name: '白楯·芹奈' },
+        { id: 'mirror', name: '银绯·玲' },
+        { id: 'neoncoil', name: '苍斩·凛' },
+        { id: 'prismrift', name: '焰甲·朱里' },
+        { id: 'wireguard', name: '黄狐·萤' },
+        { id: 'frostline', name: '夜爪·黑织' },
+        { id: 'pulse', name: '翠翼·铃' },
+        { id: 'dustblade', name: '绯尾·椿' },
+        { id: 'ironrain', name: '橙铠·琥珀' },
+        { id: 'skyshard', name: '冰华·雫' },
+        { id: 'stellar', name: '光轮·天音' },
+        { id: 'outercore', name: '橙兔·美羽' },
+      ];
+
+      const SECTIONS = [
+        {
+          id: 'title',
+          label: '主页海报',
+          render: () => {
+            const items = [
+              { file: 'cg01-station-ridge-2k.png', name: '#1 零号月台·山脊', cast: '澪 / 萤 / 凛' },
+              { file: 'cg02-core-judgment-2k.png', name: '#2 星核禁区·夜空', cast: '天音 / 美羽' },
+              { file: 'cg03-frost-valley-2k.png', name: '#3 白棺谷·冰原', cast: '黑织 / 雫' },
+              { file: 'cg04-corridor-gate-2k.png', name: '#4 锈带走廊·数字门', cast: '朱里 / 凛 / 铃' },
+              { file: 'cg05-forge-ruins-2k.png', name: '#5 熔炉城·熔流', cast: '椿 / 琥珀 / 芹奈' },
+            ];
+            return `
+              <h2>主页标题 CG（竖屏 2K）</h2>
+              <p class="hint">候选图，尚未全部接入开始页轮换。</p>
+              <div class="grid">
+                ${items
+                  .map((it) => {
+                    const src = u(`./tex/poster-candidates/${it.file}`);
+                    return cardImage(src, it.name, it.file, it.cast);
+                  })
+                  .join('')}
+              </div>`;
+          },
+        },
+        {
+          id: 'posters',
+          label: '角色海报',
+          render: () => {
+            const blocks = CHARACTERS.map((c) => {
+              const p = u(`./tex/storyboards/char-posters/${c.id}-portrait.png`);
+              const l = u(`./tex/storyboards/char-posters/${c.id}-landscape.png`);
+              return `<div class="char-block">
+                <h3>${c.name} <span class="file" style="color:var(--muted);font-weight:400">(${c.id})</span></h3>
+                <div class="pair">
+                  ${cardImage(p, '竖屏', `${c.id}-portrait.png`)}
+                  ${cardImage(l, '横屏', `${c.id}-landscape.png`, '', 'land')}
+                </div>
+              </div>`;
+            }).join('');
+            return `<h2>角色海报（竖 / 横）</h2>
+              <p class="hint">路径 tex/storyboards/char-posters/{id}-portrait|landscape.png</p>
+              ${blocks}`;
+          },
+        },
+        {
+          id: 'videos',
+          label: '皮肤 / 待机视频',
+          render: () => {
+            const vids = [
+              {
+                src: './tex/juese/ashcrow_homeland_idle_720p.mp4',
+                name: '苍羽·澪 · 家园待机',
+                note: '720×1280 · 默认皮',
+              },
+              {
+                src: './tex/juese/ashcrow_homeland_idle_768x1344.mp4',
+                name: '苍羽·澪 · 家园待机（H3 原生）',
+                note: '768×1344',
+              },
+              {
+                src: './tex/juese/pifu/shuiyi/SSR05_1_pifu02_idle_gs_h3.mp4',
+                name: '橙铠·琥珀 · 睡衣绿幕待机',
+                note: 'SSR05_1_pifu02 · 绿幕 · 大占屏',
+              },
+              {
+                src: './tex/juese/pifu/chongzao/SSR05_1_pifu03_shower_gs_h3.mp4',
+                name: '橙铠·琥珀 · 冲澡绿幕',
+                note: 'SSR05_1_pifu03 · 开喷头/脱毛巾',
+              },
+            ];
+            return `
+              <h2>近期生成视频</h2>
+              <p class="hint">点击卡片放大播放。绿幕片背景为 #00b140。</p>
+              <div class="grid">
+                ${vids
+                  .map((v) => {
+                    const src = u(v.src);
+                    return `<article class="card" data-video="${src}">
+                      <div class="thumb"><video src="${src}" muted loop playsinline preload="metadata"></video></div>
+                      <div class="meta"><div class="name">${v.name}</div><div class="file">${v.note}</div></div>
+                    </article>`;
+                  })
+                  .join('')}
+              </div>`;
+          },
+        },
+        {
+          id: 'combat',
+          label: '战斗场景',
+          render: () => {
+            const station = [
+              '01-tower',
+              '02-crane',
+              '03-factory',
+              '04-containers',
+              '05-boxcar',
+              '06-gantry',
+              '07-warehouse',
+              '08-tank',
+              '09-canopy',
+            ];
+            const corridor = [
+              '01-pylon',
+              '02-gate',
+              '03-crawler',
+              '04-solar',
+              '05-cyclone',
+              '06-beacon',
+              '07-bunker',
+              '08-bladder',
+              '09-checkpoint',
+            ];
+            const bgs = [
+              { theme: 'station', file: '03-gantry.png', name: '零号月台背景（选用）', selected: true },
+              { theme: 'corridor', file: '03-sandstorm.png', name: '锈带走廊背景（选用）', selected: true },
+            ];
+            const billboardCards = (theme, ids) =>
+              ids
+                .map((id) => {
+                  const src = u(`./tex/combat/billboards/${theme}/${id}.png`);
+                  return `<article class="card" data-src="${src}">
+                    <div class="thumb square"><img src="${src}" alt="${id}" loading="lazy" /></div>
+                    <div class="meta"><div class="name">${id}</div><div class="file">${theme}</div></div>
+                  </article>`;
+                })
+                .join('');
+            return `
+              <h2>战斗背景（选用）</h2>
+              <div class="grid" style="margin-bottom:24px">
+                ${bgs
+                  .map((b) => {
+                    const src = u(`./tex/combat/backgrounds/${b.theme}/${b.file}`);
+                    return cardImage(src, b.name, b.file, b.selected ? '游戏内使用中' : '', '', b.selected);
+                  })
+                  .join('')}
+              </div>
+              <h2>零号月台 · 2D 面片</h2>
+              <div class="grid portrait-dense" style="margin-bottom:24px">${billboardCards('station', station)}</div>
+              <h2>锈带走廊 · 2D 面片</h2>
+              <div class="grid portrait-dense">${billboardCards('corridor', corridor)}</div>
+              <p class="hint" style="margin-top:16px">完整战斗预览页：<a href="./combat-billboard-preview.html" style="color:var(--accent)">combat-billboard-preview.html</a></p>`;
+          },
+        },
+        {
+          id: 'links',
+          label: '入口',
+          render: () => `
+            <h2>预览入口</h2>
+            <p class="hint">本页汇总近期美术资源；专项工具如下。</p>
+            <div class="links">
+              <a href="./">进入游戏（首页）</a>
+              <a href="./title-poster-preview.html">主页海报专项</a>
+              <a href="./combat-billboard-preview.html">战斗面片专项</a>
+              <a href="./ai-living-preview.html">AI 营地生活</a>
+            </div>`,
+        },
+      ];
+
+      function cardImage(src, name, file, extra = '', thumbClass = '', selected = false) {
+        const badge =
+          extra && (extra.includes('使用') || extra.includes('选用'))
+            ? `<span class="badge">${extra}</span>`
+            : extra
+              ? `<div class="file">${extra}</div>`
+              : '';
+        return `<article class="card${selected ? ' selected' : ''}" data-src="${src}">
+          <div class="thumb ${thumbClass}"><img src="${src}" alt="${name}" loading="lazy" /></div>
+          <div class="meta"><div class="name">${name}</div><div class="file">${file || ''}</div>${badge}</div>
+        </article>`;
+      }
+
+      const tabs = document.getElementById('tabs');
+      const panels = document.getElementById('panels');
+      const lb = document.getElementById('lb');
+      const lbImg = document.getElementById('lb-img');
+      const lbVid = document.getElementById('lb-vid');
+
+      SECTIONS.forEach((sec, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'tab' + (i === 0 ? ' active' : '');
+        btn.textContent = sec.label;
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab').forEach((el) => el.classList.remove('active'));
+          document.querySelectorAll('.panel').forEach((el) => el.classList.remove('active'));
+          btn.classList.add('active');
+          document.querySelector(`.panel[data-id="${sec.id}"]`)?.classList.add('active');
+        });
+        tabs.appendChild(btn);
+
+        const panel = document.createElement('div');
+        panel.className = 'panel' + (i === 0 ? ' active' : '');
+        panel.dataset.id = sec.id;
+        panel.innerHTML = sec.render();
+        panels.appendChild(panel);
+      });
+
+      function openImage(src) {
+        lbVid.pause();
+        lbVid.removeAttribute('src');
+        lbVid.hidden = true;
+        lbImg.hidden = false;
+        lbImg.src = src;
+        lb.classList.add('open');
+      }
+      function openVideo(src) {
+        lbImg.hidden = true;
+        lbImg.removeAttribute('src');
+        lbVid.hidden = false;
+        lbVid.src = src;
+        lb.classList.add('open');
+        lbVid.play().catch(() => {});
+      }
+      function closeLb() {
+        lb.classList.remove('open');
+        lbVid.pause();
+        lbVid.removeAttribute('src');
+        lbImg.removeAttribute('src');
+      }
+
+      panels.addEventListener('click', (e) => {
+        const card = e.target.closest('.card');
+        if (!card) return;
+        if (card.dataset.video) openVideo(card.dataset.video);
+        else if (card.dataset.src) openImage(card.dataset.src);
+      });
+      // hover autoplay for video thumbs
+      panels.addEventListener(
+        'mouseenter',
+        (e) => {
+          const v = e.target.closest('.card')?.querySelector('video');
+          if (v) v.play().catch(() => {});
+        },
+        true,
+      );
+      panels.addEventListener(
+        'mouseleave',
+        (e) => {
+          const v = e.target.closest('.card')?.querySelector('video');
+          if (v) {
+            v.pause();
+            v.currentTime = 0;
+          }
+        },
+        true,
+      );
+
+      lb.addEventListener('click', closeLb);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeLb();
+      });
+    </script>
+  </body>
+</html>
