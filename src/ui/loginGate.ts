@@ -5,6 +5,7 @@
  * 登录成功 + Key 校验通过 → resolve(true)。
  */
 import { setStoredApiKey } from '../ai/llmClient';
+import { fetchDashscope } from '../ai/dashscopeFailover';
 import type { LoginResult } from '../platform/license';
 
 export function showLoginGate(
@@ -150,21 +151,23 @@ export function showLoginGate(
   });
 }
 
-/** DashScope Key 实连校验（极小调用） */
-async function checkQwenKey(key: string): Promise<{ ok: boolean; message: string }> {
+/** DashScope Key 实连校验（极小调用） */async function checkQwenKey(key: string): Promise<{ ok: boolean; message: string }> {
   const ctrl = new AbortController();
   const timer = window.setTimeout(() => ctrl.abort(), 15000);
   try {
-    const res = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'qwen-flash',
-        messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 1,
-      }),
-      signal: ctrl.signal,
-    });
+    const res = await fetchDashscope(
+      'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'qwen-flash',
+          messages: [{ role: 'user', content: 'hi' }],
+          max_tokens: 1,
+        }),
+        signal: ctrl.signal,
+      },
+    );
     if (res.ok) return { ok: true, message: '' };
     const text = await res.text().catch(() => '');
     if (res.status === 401) return { ok: false, message: 'API Key 无效，请到阿里云百炼重新生成' };

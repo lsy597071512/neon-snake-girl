@@ -40,6 +40,8 @@ import {
 } from '../systems/CyberHealthSystem';
 import { texUrl } from '../utils/texUrl';
 import { playUiSound } from './uiSound';
+import { showRecruitPage, preloadRecruitCutscene, RECRUIT_BG_SRC } from './recruitPage';
+import { GACHA_PITY } from '../data/characters';
 
 function escapeHtml(s: string): string {
   return s
@@ -89,6 +91,30 @@ export type CampWarehousePanelOpts = {
   initialMode?: 'warehouse' | 'shop';
   onChanged?: () => void;
 };
+
+/** 老板娘页上的招募入口（与商城页同一视觉语汇的图标徽记按钮） */
+function recruitEntryHtml(): string {
+  const s = saveManager.get();
+  return `
+    <button type="button" class="recruit-entry recruit-entry--keeper" data-action="open-recruit" aria-label="前往唤醒协议招募">
+      <img class="recruit-entry-bg" src="${texUrl(RECRUIT_BG_SRC)}" alt="" aria-hidden="true" />
+      <span class="recruit-entry-veil" aria-hidden="true"></span>
+      <span class="recruit-entry-sigil" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="none">
+          <polygon points="32,3 58,18 58,46 32,61 6,46 6,18" stroke="currentColor" stroke-width="2.5" />
+          <polygon points="32,11 51,22 51,42 32,53 13,42 13,22" stroke="currentColor" stroke-width="1.2" opacity="0.65" />
+          <circle cx="32" cy="32" r="8" stroke="currentColor" stroke-width="2.5" />
+          <circle cx="32" cy="32" r="3.2" fill="currentColor" />
+          <path d="M32 3v8M32 53v8M6 18l7 4M51 42l7 4M58 18l-7 4M13 42l-7 4" stroke="currentColor" stroke-width="2" />
+        </svg>
+      </span>
+      <span class="recruit-entry-body">
+        <strong>唤醒协议 · 构装体招募</strong>
+        <small>保底 ${GACHA_PITY}（当前 ${s.gachaPity}）</small>
+      </span>
+      <span class="recruit-entry-go">进入 ❯</span>
+    </button>`;
+}
 
 export function showCampWarehousePanel(opts: CampWarehousePanelOpts = {}): void {
   document.querySelector('[data-camp-wh-panel]')?.remove();
@@ -279,6 +305,7 @@ export function showCampWarehousePanel(opts: CampWarehousePanelOpts = {}): void 
                   <div class="camp-shop-keeper-figure">
                     <img class="camp-shop-keeper-art" data-shop-keeper-art src="${escapeHtml(keeperArt)}" alt="${escapeHtml(CAMP_SHOPKEEPER_NAME)}" />
                   </div>
+                  ${recruitEntryHtml()}
                 </aside>
                 <div class="camp-shop-shelf">
                   <p class="camp-living-hint">${campShopDayLabel(living)} · 在售 ${available}/30 · 每件库存 1，买完即下架 · 隔日刷新</p>
@@ -290,6 +317,12 @@ export function showCampWarehousePanel(opts: CampWarehousePanelOpts = {}): void 
       </div>
     `;
 
+    overlay.querySelector('[data-action="open-recruit"]')?.addEventListener('click', () => {
+      playUiSound('tap');
+      preloadRecruitCutscene();
+      showRecruitPage({ onExit: () => render() });
+    });
+    if (mode === 'shop') preloadRecruitCutscene();
     overlay.querySelector('[data-wh-close]')?.addEventListener('click', closePanel);
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) closePanel();

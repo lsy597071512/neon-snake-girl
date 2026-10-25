@@ -12,7 +12,7 @@ import { getAffinityCombatMul } from '../systems/AffinityGameplay';
  * 1) 战力 = 角色基础 + 武器基础 + 角色碎片强化 + 武器强化（可成长）
  * 2) 稀有度系数固定：职级越高输出越高
  * 3) 职业系数固定：由定位 tag 决定，不随养成改变
- * 4) 未装备武器有裸装惩罚，突出武器价值
+ * 4) 未装备武器有空装折扣，突出武器价值
  * 弹伤 = 战力/8 × 稀有度 × 职业 × 武装系数
  */
 
@@ -30,7 +30,7 @@ const RARITY_BASE_POWER: Record<Rarity, number> = {
   UR: 225,
 };
 
-/** 未装备武器时的输出惩罚 */
+/** 未装备武器时的输出折扣 */
 export const UNARMED_DAMAGE_MUL = 0.7;
 
 /**

@@ -20,6 +20,7 @@ import type {
 } from './types';
 import { getHour } from './worldClock';
 import { personaDayMode } from './characterPersona';
+import { getMoodSnapshot } from './moodContinuum';
 import {
   applyDesireBoostsToCandidates,
   pushDesireForcedCandidates,
@@ -164,6 +165,13 @@ export function isProtectedAgenda(
     (agenda.goal === 'sleep' || agenda.goal === 'prepare_sleep') &&
     agenda.remainGameMin > 0
   ) {
+    return true;
+  }
+  if (agenda.goal === 'discipline_session' || agenda.goal === 'bath_assist') {
+    return true;
+  }
+  // 安抚室会话：安抚事件进行中不被生活导演/对话切景顶掉
+  if (agenda.goal === 'anfu') {
     return true;
   }
   return false;
@@ -311,6 +319,7 @@ export function pickNewAgenda(
   const fears = profile?.fears ?? [];
   const salt = living.gameMinutes + living.dayIndex * 17;
   const dayMode = personaDayMode(living, characterId);
+  const mood = getMoodSnapshot(living, characterId);
   const candidates: AgendaCandidate[] = [];
 
   const push = (c: AgendaCandidate) => {
@@ -344,6 +353,20 @@ export function pickNewAgenda(
     }
     if (dayMode === 'dutiful') {
       if (goal === 'work' || goal === 'armory_maintain') return base + 5;
+    }
+    return base;
+  };
+
+  // 心情连续体 → 议程权重（活人定律：心情差→独处/歇息，心情好→社交/玩乐）
+  const moodBoost = (goal: string, base: number): number => {
+    if (mood.valence <= -35) {
+      if (goal === 'rest' || goal === 'idle_home' || goal === 'sleep') return base + 8;
+      if (goal === 'play' || goal === 'hall_chat' || goal === 'pool_soak' || goal === 'dance')
+        return base - 8;
+    }
+    if (mood.valence >= 40) {
+      if (goal === 'play' || goal === 'hall_chat' || goal === 'pool_soak' || goal === 'dance')
+        return base + 6;
     }
     return base;
   };
@@ -522,6 +545,25 @@ export function pickNewAgenda(
     });
   }
 
+  // 想跳舞：白天/傍晚在大厅起舞（与营地舞蹈派对同场地，勿与其它会话冲突）
+  if ((hour >= 10 && hour < 22) && !/bathe|sleep/.test(personaDayMode(living, characterId))) {
+    const playLike = needs.some((n) => /社交|热闹|玩|陪伴|表演|展示/.test(n));
+    push({
+      goal: 'dance',
+      targetRoomId: hash01(characterId, salt + 41) > 0.5 ? 'room_1f_hall1' : 'room_2f_hall_west',
+      activity: 'play',
+      behavior: '在大厅起舞，随节拍摆开舞步',
+      remainGameMin: randRange(characterId, salt + 42, 40, 80),
+      reason: '想跳舞',
+      source: 'social',
+      weight:
+        2.6 +
+        (playLike ? 2.2 : 0) +
+        (dayMode === 'playful' ? 3.5 : 0) +
+        (hour >= 19 && hour < 22 ? 1.4 : 0),
+    });
+  }
+
   // 厕所短需求（低权重，短时长）
   if (hour >= 6 && hour < 23 && hash01(characterId, salt + 9) > 0.82) {
     push({
@@ -562,6 +604,20 @@ export function pickNewAgenda(
     weight: 1,
   });
 
+  // 心情极差：高权重"独处消化"候选——回自己房间一个人待着，缓一缓情绪
+  if (mood.valence <= -50) {
+    push({
+      goal: 'rest',
+      targetRoomId: home.id,
+      activity: 'rest',
+      behavior: `一个人待在${roomLabel(home.id)}，缓一缓情绪（心情「${mood.labelZh}」）`,
+      remainGameMin: randRange(characterId, salt + 55, 90, 180),
+      reason: '心情很糟，不想见人，想自己静一静',
+      source: 'social',
+      weight: 11,
+    });
+  }
+
   // 欲望极强时补地标短意图
   pushDesireForcedCandidates(living, characterId, push);
 
@@ -584,9 +640,9 @@ export function pickNewAgenda(
     });
   }
 
-  // 今日模式 + 欲望表抬权（商店/泳池/武器库/塔等）
+  // 今日模式 + 心情 + 欲望表抬权（商店/泳池/武器库/塔等）
   for (const c of candidates) {
-    c.weight = Math.max(0.5, modeBoost(c.goal, c.weight));
+    c.weight = Math.max(0.5, moodBoost(c.goal, modeBoost(c.goal, c.weight)));
   }
   applyDesireBoostsToCandidates(living, characterId, candidates);
 
@@ -757,5 +813,5 @@ export function describeAgendaForPrompt(living: AiLivingSave, characterId: strin
   const a = agenda!;
   const name = CHARACTER_MAP[characterId]?.name ?? characterId;
   const stance = a.eventStance ? `；对事件态度：${a.eventStance}` : '';
-  return `${name}正打算「${a.reason}」→ 去${roomLabel(a.targetRoomId)}（${a.behavior}），大约还要 ${a.remainGameMin} 游戏分钟${stance}。`;
+  return `${name}的打算是「${a.reason}」→ 之后去${roomLabel(a.targetRoomId)}（${a.behavior}），大约还要 ${a.remainGameMin} 游戏分钟${stance}。注意：这是**打算/计划**，尚未发生；除非她此刻就在那里，否则禁止说成"我正在/我已经在"。`;
 }

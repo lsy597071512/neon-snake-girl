@@ -1,0 +1,11 @@
+# Android 签名配置模板
+#
+# 复制本文件为 android/key.properties（同目录，不进 git）并填入真实值。
+# 换电脑打包时，必须携带【同一个】keystore 文件，否则签名变化会导致
+# "安装失败(-7) 与已安装应用签名不同"，玩家只能卸载重装 → 存档丢失。
+#
+# keystore 路径建议使用绝对路径（Windows 路径的反斜杠会被自动转义，无需手改）。
+storeFile=../keystore/rust-belt-era.jks
+storePassword=
+keyAlias=
+keyPassword=

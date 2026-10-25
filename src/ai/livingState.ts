@@ -13,6 +13,7 @@ import { agendaToPresenceOverride, getAgenda, isAgendaActive } from './character
 import { coerceActivityToRoom } from './dialoguePresence';
 import { applyLifePathOverrideToPresence } from './lifePathDirector';
 import { applySleepPresenceOverride } from './sleepSystem';
+import { applyTravelPresence } from './travel';
 import { getDayMinute, getHour } from './worldClock';
 import type { AiLivingSave, CharacterActivity, LightStatusTag, LivingPresence } from './types';
 
@@ -244,15 +245,16 @@ export function resolvePresence(characterId: string, living: AiLivingSave): Livi
     if (r) {
       // 身体以 agent 房间为准；活动必须与房间相容（防任意「错房+错活动」幽灵状态）
       const bodyMatchesAgenda = roomId === ov.roomId;
-      let activity = bodyMatchesAgenda
-        ? ov.activity
-        : ((agent?.activity as CharacterActivity | undefined) ||
-          (roomId === 'room_1f_bath' ? 'bathe' : ov.activity));
+      // 身体不在议程目标房时：**不能用 agent 的旧行为**（否则人在卧室会说"在厅口值守"）。
+      // 用作息表/锚点推出来的 base 行为；仅当 base 也指同一房间才可信。
+      const sameAsBase = base.roomId === roomId;
+      let activity = bodyMatchesAgenda ? ov.activity : base.activity;
       activity = coerceActivityToRoom(roomId, activity, '');
       const behavior = bodyMatchesAgenda
         ? ov.behavior
-        : agent?.behavior ||
-          (roomId === 'room_1f_bath' ? '在浴室洗浴' : ov.behavior);
+        : sameAsBase
+          ? base.behavior
+          : `在${roomLabel(r)}${roomId === 'room_1f_bath' ? '洗浴' : '做自己的事'}`;
       base = {
         ...base,
         roomId,
@@ -286,7 +288,7 @@ export function resolvePresence(characterId: string, living: AiLivingSave): Livi
     }
   }
 
-  // 小黑屋会话是最高优先级：作息、生活路径和睡眠相位都不能覆盖它。
+  // 负一层库房锚定（历史会话残留兼容）
   const discipline = living.disciplineSession;
   if (discipline?.active && discipline.characterId === characterId) {
     const room = R["room_b1_discipline"];
@@ -295,19 +297,17 @@ export function resolvePresence(characterId: string, living: AiLivingSave): Livi
         ...base,
         roomId: room.id,
         locationId: room.sceneId,
-        activity: 'talking',
-        behavior:
-          discipline.poseIndex != null && discipline.poseIndex > 0
-            ? `在负一楼小黑屋触手调教姿势${discipline.poseIndex}中，被机械触手固定，无法自行离开`
-            : '在负一楼小黑屋穿着调教约束皮待机，尚未被触手加压姿势缠住；房间门锁死，无法自行离开',
-        label: `调教中 · ${room.floor}楼·${room.label}`,
+        activity: 'idle',
+        behavior: '在负一层库房',
+        label: `${room.floor}楼·${room.label}`,
       };
     }
   }
 
   const withLife = applyLifePathOverrideToPresence(characterId, base);
+  const traveling = applyTravelPresence(characterId, living, withLife);
   // 睡眠系统相位优先：准备入睡 / 睡着 / 被打扰 锁卧室与活动
-  return applySleepPresenceOverride(characterId, living, withLife);
+  return applySleepPresenceOverride(characterId, living, traveling ?? withLife);
 }
 
 /** 院落可见簇：默认外景应能看见大门/泳池/塔/商店/武器库的人 */

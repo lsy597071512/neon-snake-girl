@@ -90,7 +90,7 @@
   --hud-footer-h: clamp(56px, 18vw, 100px);
   --hud-stack-bottom: calc(var(--hud-footer-h) + var(--safe-bottom));
   --wl-top-h: clamp(92px, 14vw, 128px);
-  --wl-bottom-nav-h: clamp(50px, 7.8vw, 68px);
+  --wl-bottom-nav-h: clamp(62px, 10.5vw, 84px);
   --wl-ui-bottom: calc(var(--wl-bottom-nav-h) + var(--safe-bottom) + 8px);
   padding-top: 0;
   background: transparent;
@@ -255,7 +255,8 @@
   bottom: calc(var(--hub-char-bottom) + var(--safe-bottom));
   transform: translateX(-46%);
   width: 88%;
-  height: 78%;
+  /* v5 BUG4：78% → 86%，给动态皮肤头/脚留足显示高度 */
+  height: 86%;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -875,6 +876,12 @@
 
 /* ── 主页立绘舞台：一级 / 二级动画切换（与静态立绘同尺寸同锚点） ── */
 .hub-portrait-stage {
+  /* v5 BUG4：动态皮肤全身入画 ——
+     1) 撤销下推（frame/18 会把脚推出容器底）与放大（1.02 会把头顶推出容器顶）；
+     2) 视频层改 contain（cover 会按容器比例裁掉头/脚），透空处露出场景背景，
+        配合 object-position: center bottom 保持脚底锚点。 */
+  --hub-portrait-scale: 1;
+  --hub-portrait-shift-y: 0px;
   position: relative;
   width: 100%;
   height: 100%;
@@ -894,6 +901,13 @@
 .hub-portrait-stage.is-tapped .hub-portrait-primary {
   filter: brightness(1.12) drop-shadow(0 12px 32px rgba(0, 0, 0, 0.55));
   transition-duration: 0.18s;
+}
+
+/* v5 BUG4：舞台内动态皮肤全身入画（cover → contain），头/脚不再被裁 */
+.hub-portrait-stage .hub-portrait-primary,
+.hub-portrait-stage .hub-portrait-secondary {
+  object-fit: contain;
+  object-position: center bottom;
 }
 
 .hub-portrait-stage.has-secondary {
@@ -1083,7 +1097,10 @@
 /** 内孔裁切：对齐装饰框内圆，略放大头像裁掉素材留白 */
 .wl-avatar-inner {
   position: absolute;
-  inset: 11%;
+  left: 24%;
+  top: 15%;
+  width: 64%;
+  height: 64%;
   border-radius: 50%;
   overflow: hidden;
   z-index: 1;
@@ -1103,11 +1120,11 @@
 .wl-avatar-portrait,
 .wl-avatar .char-live-portrait {
   display: block;
-  width: 118%;
-  height: 118%;
-  margin: -9%;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   object-fit: cover;
-  object-position: center 24%;
+  object-position: center 30%;
 }
 
 .wl-avatar-emoji {
@@ -1429,8 +1446,8 @@
   object-position: left center;
   display: block;
   filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.35));
-  -webkit-mask-image: linear-gradient(to right, #000 0%, #000 42%, transparent 100%);
-  mask-image: linear-gradient(to right, #000 0%, #000 42%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 0%, #000 62%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 0%, #000 62%, transparent 100%);
 }
 
 .wl-side-text {
@@ -1630,6 +1647,81 @@
 
 .wl-nav-tab:active {
   transform: scale(0.97);
+}
+
+/* ── 剧情指引高亮：只加视觉层，不改玩法逻辑 ── */
+.wl-nav-tab.story-guide-target,
+.wl-side-btn.story-guide-target {
+  z-index: 60;
+  overflow: visible;
+}
+.wl-nav-tab.story-guide-target .wl-nav-label {
+  color: #ffe9b0;
+  text-shadow: 0 0 12px rgba(255, 190, 80, 0.9), 0 2px 4px rgba(0, 0, 0, 0.9);
+}
+.wl-nav-tab.story-guide-target::after,
+.wl-side-btn.story-guide-target::after {
+  content: '';
+  position: absolute;
+  inset: -4px -6px;
+  border: 2px solid rgba(255, 200, 90, 0.95);
+  border-radius: 12px;
+  box-shadow: 0 0 0 4px rgba(255, 170, 60, 0.25), 0 0 18px rgba(255, 180, 70, 0.65);
+  animation: story-guide-pulse 1.1s ease-in-out infinite;
+  pointer-events: none;
+}
+.wl-side-btn.story-guide-target img {
+  -webkit-mask-image: none;
+  mask-image: none;
+  filter: drop-shadow(0 0 10px rgba(255, 190, 90, 0.8)) drop-shadow(0 3px 8px rgba(0, 0, 0, 0.35));
+}
+@keyframes story-guide-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.75; transform: scale(1.03); }
+}
+/* 强制引导：误触非目标时高亮洞左右摇一下提示 */
+.deny-shake .story-spotlight-hole {
+  animation: story-deny-shake 0.35s ease;
+}
+/* 信息位巡览小标签：金色描边元素的名称牌，只看不点 */
+.story-tour-chip {
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 2;
+  max-width: 76vw;
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 200, 110, 0.95);
+  border-radius: 10px;
+  background: rgba(12, 10, 8, 0.9);
+  color: #ffe2b0;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.5;
+  text-align: center;
+  white-space: normal;
+  pointer-events: none;
+  box-shadow: 0 0 12px rgba(240, 190, 120, 0.7);
+  animation: story-tour-bob 1.2s ease-in-out infinite;
+}
+.story-tour-chip b {
+  margin-right: 4px;
+  color: #fff4d8;
+}
+.story-tour-chip em {
+  display: block;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.75;
+}
+@keyframes story-tour-bob {
+  50% { transform: translateX(-50%) translateY(-3px); }
+}
+@keyframes story-deny-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  50% { transform: translateX(5px); }
+  75% { transform: translateX(-3px); }
 }
 
 /* ── 主页烟雾（UI 最上层，不挡交互） ── */

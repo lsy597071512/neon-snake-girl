@@ -4,6 +4,8 @@ import { CHARACTER_MAP } from '../data/characters';
 import { tickHeartbeat } from './heartbeat';
 import { consumeOfflineSummary, processOfflineReturn } from './offlineSummary';
 import { applyBatheShowerSkins, applyEventTempSkins } from './campEvents/campEventEffects';
+import { processTravelArrivals } from './travelArrival';
+import { isTraveling, planTravel } from './travel';
 import { runPlayerDialogue } from './dialogueEngine';
 import { pushCampLog, pushMemory, hydrateCharacterMemoryFromArchive } from './memory';
 import { getAgenda, isAgendaActive, tickAllAgendas } from './characterAgenda';
@@ -17,6 +19,7 @@ import {
   seedCyberHealthForOwned,
 } from '../systems/CyberHealthSystem';
 import { getCoScreenGroupForCharacter, tickCampEvents, trySpawnCampEvent } from './campEvents';
+import { syncCharacterSkinRuntime } from '../ui/characterSkinRuntime';
 import { getCampEventDef } from './campEvents/catalog';
 import { resolveCharacterSceneImageId, resolveCharacterRoomId, resolvePresence } from './livingState';
 import { applyGiftAffinity, getAffinity, tickRelationsFromAiBehavior } from './relationship';
@@ -48,6 +51,8 @@ import {
   isDeepSleeping,
   isInSleepSystem,
   markSleepDisturbed,
+  sleepBackIfLeftAloneAfterWake,
+  sleepWakeDifficulty,
   syncSleepCampSkin,
   tickSleepSystem,
 } from './sleepSystem';
@@ -56,6 +61,72 @@ import {
   scrubOrphanDisciplineArtifacts,
   maybeProposeDisciplineInvite,
 } from './disciplineSession';
+import {
+  acceptBathAssistInvite,
+  buildBathAssistPlayerProposeMessage,
+  canShowBathButtons,
+  detectPlayerBathAssistMode,
+  enterBathAssistSession,
+  getBathAssistSession,
+  isBathAssistActiveFor,
+  rejectBathAssistInvite,
+  recoverStaleBathAssistSession,
+  setPlayerBathAssistAsk,
+  tryCompleteBathAssistPrepare,
+} from './bathAssistSession';
+import {
+  acceptDanceInvite,
+  beginCoDance,
+  beginSoloDance,
+  canShowDanceButtons,
+  clearDanceIfLeftHall,
+  detectPlayerDanceMode,
+  finishDanceDressing,
+  finishDanceUnveil,
+  getDanceSession,
+  leaveDanceSession,
+  recoverStaleDanceSession,
+  rejectDanceInvite,
+  returnToPrepare,
+  setPlayerDanceAsk,
+  tickDanceSession,
+} from './danceSession';
+import {
+  acceptAnfuInvite,
+  buildAnfuAttackPlayerText,
+  canShowAnfuButtons,
+  clearAnfuIfLeftRoom,
+  detectPlayerAnfu,
+  enterAnfuSession,
+  finishAnfuDressing,
+  isAnfuActiveFor,
+  leaveAnfuSession,
+  recoverStaleAnfuSession,
+  rejectAnfuInvite,
+  requestAnfuAttack,
+  setPlayerAnfuAsk,
+  tickAnfuSession,
+} from './anfuSession';
+import {
+  recoverStaleMiniGameSession,
+  tickMiniGameSession,
+} from './miniGameSession';
+import {
+  acceptMiniGameInvite,
+  canShowMiniGameButtons,
+  detectPlayerMiniGameKind,
+  getMiniGameSession,
+  isMiniGameActiveFor,
+  miniGameKindLabel,
+  playerGomokuMove,
+  playerRpsThrow,
+  quitMiniGameByPlayer,
+  rejectMiniGameInvite,
+  setPlayerMiniGameAsk,
+  type MiniGameKind,
+} from './miniGameSession';
+import type { RpsThrow } from '../game/miniGames/rps';
+import { getAnfuClipList, getDanceSoloClipList } from '../data/characterSkins';
 import type { AiLivingSave, AiMessageEvent, DialogueRequest, LlmDialogueResult } from './types';
 import type { PlayerDialogueOpts } from './dialogueEngine';
 
@@ -110,9 +181,22 @@ function applyPostClockLivingEffects(
   tickMoodDecayForOwned(living, owned);
   tickAllAgendas(living, owned, prevGameMinutes);
   tickSleepSystem(living, owned);
+  // 走路到点 → 落点 + 会话相位切换（舞蹈/安抚到场）
+  processTravelArrivals(living);
   tickCampEvents(living, owned, (delta) => applyGoldDelta(d, delta));
   applyEventTempSkins(d, living);
   applyBatheShowerSkins(d, living);
+  tickDanceSession(d, living);
+  tickAnfuSession(d, living);
+  tickMiniGameSession(d, living);
+  // 到点的换装（含事件临时外覆）在营地/Hub 也要按时穿上，不能等开对话
+  for (const id of owned) {
+    try {
+      completeDueOutfitChange(d, living, id);
+    } catch {
+      /* 单个角色失败不阻塞其余 */
+    }
+  }
   tryApplyEmotionOutfits(d, living, owned);
   if (living.gameMinutes !== prevGameMinutes) {
     tickRelationsFromAiBehavior(living, owned, (id) => resolveCharacterRoomId(id, living));
@@ -129,6 +213,10 @@ function settleCharacterForDialogue(
   living: AiLivingSave,
   characterId: string,
 ): void {
+  // 正在赶路：不瞬移、不抢换装；对白就发生在出发房间（她会说"我正过去"）
+  if (isTraveling(living, characterId)) {
+    return;
+  }
   const co = getCoScreenGroupForCharacter(living, characterId);
   if (co) {
     const def = getCampEventDef(co.defId);
@@ -158,6 +246,18 @@ function settleCharacterForDialogue(
       behavior = agenda.behavior;
     }
   } else if (isAgendaActive(agenda) && agenda?.targetRoomId && CAMP_ROOM_MAP[agenda.targetRoomId]) {
+    const p = resolvePresence(characterId, living);
+    if (p.roomId !== agenda.targetRoomId) {
+      // 只有议程没有身体：按"正在过去"走行程，不瞬移
+      planTravel(living, characterId, agenda.targetRoomId, p.roomId, {
+        activity: agenda.activity,
+        behavior: agenda.behavior,
+        reason: 'agenda_walk',
+        arriveBehavior: agenda.behavior,
+      });
+      forceSyncEmotionOutfitForDialogue(save, living, characterId);
+      return;
+    }
     roomId = agenda.targetRoomId;
     activity = agenda.activity;
     behavior = agenda.behavior;
@@ -303,6 +403,9 @@ async function runHeartbeatOnceImpl(): Promise<void> {
   saveManager.mutate((d) => {
     applyEventTempSkins(d, working);
     applyBatheShowerSkins(d, working);
+    tickDanceSession(d, working);
+    tickAnfuSession(d, working);
+    tickMiniGameSession(d, working);
     tryApplyEmotionOutfits(d, working, owned);
     d.aiLiving = working;
     applyGoldDelta(d, goldDelta);
@@ -355,8 +458,11 @@ export async function talkToCharacter(
 
   // Mark the interruption before refreshing the dialogue scene so the first
   // prompt and portrait both reflect that the character has been disturbed.
+  // 但睡太沉叫不醒时不改相位（否则 Prompt 会写成「已被吵醒」，实际只翻了个身）。
   if ((opts?.turnMode ?? 'reply') === 'reply' && isDeepSleeping(working, characterId)) {
-    markSleepDisturbed(working, characterId, '指挥官在睡觉时找你聊天');
+    if (sleepWakeDifficulty(working, characterId).wakeable) {
+      markSleepDisturbed(working, characterId, '指挥官在睡觉时找你聊天');
+    }
   }
 
   // 发话前：到点的换装先穿上，再对齐位置；展示锁定期不让情绪选装扒皮
@@ -370,6 +476,23 @@ export async function talkToCharacter(
       completeDueOutfitChange(d, working, characterId);
     }
     settleCharacterForDialogue(d, working, characterId);
+    // 玩家本轮文字/语音若在邀请跳舞，登记待回应（按钮同样走此路径，保证三通道等效）
+    if ((opts?.turnMode ?? 'reply') === 'reply') {
+      const dm = detectPlayerDanceMode(playerMessage);
+      if (dm && canShowDanceButtons(working, characterId)) {
+        setPlayerDanceAsk(working, characterId, dm);
+      }
+      if (detectPlayerAnfu(playerMessage) && canShowAnfuButtons(working, characterId)) {
+        setPlayerAnfuAsk(working, characterId);
+      }
+      // 玩家文字/语音里提出「玩剪刀石头布 / 下五子棋」→ 登记待回应（按钮同一路径，三通道等效）
+      const mg = detectPlayerMiniGameKind(playerMessage);
+      if (mg && canShowMiniGameButtons(working, characterId)) {
+        setPlayerMiniGameAsk(working, characterId, mg);
+      }
+      // 玩家文字/语音里提出「帮我冲澡 / 一同泡澡」→ 登记待回应（按钮同一路径，三通道等效）
+      registerPlayerBathAskFromText(working, characterId, playerMessage);
+    }
     d.aiLiving = working;
   });
   opts?.onWorldSynced?.();
@@ -385,6 +508,7 @@ export async function talkToCharacter(
   commitDialogueSceneSnapshot(working, characterId);
   saveManager.mutate((d) => {
     d.aiLiving = working;
+    syncCharacterSkinRuntime(d);
   });
   return result;
 }
@@ -421,9 +545,13 @@ export async function openDialogueSession(characterId: string): Promise<{
   saveManager.mutate((d) => {
     const owned = d.ownedCharacters.map((c) => c.characterId);
     applyPostClockLivingEffects(d, working, owned, prev, prevDay);
-    // 打开对话时再扫一遍：清卡死调教态 / 孤儿束缚锚点
+    // 打开对话时再扫一遍：清卡死事件态 / 孤儿锚点
     scrubOrphanDisciplineArtifacts(working);
     recoverStaleDisciplineSession(d, working);
+    recoverStaleBathAssistSession(d, working);
+    recoverStaleDanceSession(d, working);
+    recoverStaleAnfuSession(d, working);
+    recoverStaleMiniGameSession(d, working);
     reconcileBodyAnchor(d, working, characterId);
     completeDueOutfitChange(d, working, characterId);
     if (isInSleepSystem(working, characterId)) {
@@ -433,6 +561,7 @@ export async function openDialogueSession(characterId: string): Promise<{
     // 开场记下初始场景；首句尚无「切换」，从第二句起才对比
     commitDialogueSceneSnapshot(working, characterId, captureDialogueSceneSnapshot(working, characterId));
     d.aiLiving = working;
+    syncCharacterSkinRuntime(d);
   });
 
   await hydrateCharacterMemoryFromArchive(working, characterId);
@@ -589,6 +718,56 @@ export function settleDueOutfitChangeNow(characterId: string): { applied: boolea
   return out;
 }
 
+/** 营地/Hub 轻量心跳：只处理"到点的换装"，不推进世界、不写盘（无到期直接返回） */
+export function tickDueOutfitChanges(): void {
+  const living = getAiLiving();
+  const pending = living.pendingOutfitChanges;
+  const now = Date.now();
+  const outfitDue = !!pending &&
+    Object.values(pending).some((p) => p.phase === 'changing' && now >= p.readyAtMs);
+  const travelDue =
+    !!living.travelPlans &&
+    Object.values(living.travelPlans).some(
+      (p) =>
+        now >= p.arriveAtMs ||
+        (p.waypoints ?? []).some((w) => !w.reached && now - p.startedAtMs >= w.atMs),
+    );
+  if (!outfitDue && !travelDue) return;
+  saveManager.mutate((d) => {
+    const live = ensureLiving(d);
+    // 先落点（可能切会话相位），再补换装
+    processTravelArrivals(live);
+    for (const c of d.ownedCharacters) {
+      try {
+        completeDueOutfitChange(d, live, c.characterId);
+      } catch {
+        /* 单角色失败不阻塞其余 */
+      }
+    }
+    d.aiLiving = live;
+  });
+}
+
+/** 对话内 1s 心跳：行程到点即时落点/切相位（返回系统行） */
+export function processTravelArrivalsNow(): string[] {
+  let lines: string[] = [];
+  const living = getAiLiving();
+  if (!living.travelPlans || !Object.keys(living.travelPlans).length) return lines;
+  const now = Date.now();
+  const due = Object.values(living.travelPlans).some(
+    (p) =>
+      now >= p.arriveAtMs ||
+      (p.waypoints ?? []).some((w) => !w.reached && now - p.startedAtMs >= w.atMs),
+  );
+  if (!due) return lines;
+  saveManager.mutate((d) => {
+    const live = ensureLiving(d);
+    lines = processTravelArrivals(live);
+    d.aiLiving = live;
+  });
+  return lines;
+}
+
 /** 对话 UI（P3）：换装剩余毫秒；无挂起换装 = 0 */
 export function getOutfitChangeCountdownMs(characterId: string): number {
   return remainingOutfitChangeMs(getAiLiving(), characterId);
@@ -619,12 +798,596 @@ export function releaseDialogueSceneSession(characterIds?: string[]): void {
         completeDueOutfitChange(d, living, id);
         clearBathIntimateConsentIfNotBathing(living, id);
         syncOutfitToCurrentPresence(d, living, id);
+        clearDanceIfLeftHall(d, living, id);
+        clearAnfuIfLeftRoom(d, living, id);
       } catch {
         /* 单角色卫生失败不阻塞其余 */
       }
     }
     ensureDialogueSceneFields(living);
   });
+}
+
+export function observeDanceStateForUi(characterId: string): {
+  active: boolean;
+  mode: 'solo' | 'co' | null;
+  phase: 'dressing' | 'travel' | 'prepare' | 'unveil' | 'dancing' | null;
+  soloPaused: boolean;
+  hasAssets: boolean;
+  pendingInvite: boolean;
+} {
+  const living = getAiLiving();
+  const s = living.danceSession;
+  const mine = s?.active && s.characterId === characterId ? s : null;
+  return {
+    active: Boolean(mine),
+    mode: (mine?.mode ?? null) as 'solo' | 'co' | null,
+    phase: (mine?.phase ?? null) as 'dressing' | 'travel' | 'prepare' | 'unveil' | 'dancing' | null,
+    soloPaused: Boolean(mine?.soloPaused),
+    hasAssets: canShowDanceButtons(living, characterId),
+    pendingInvite: living.pendingDanceInvite?.characterId === characterId,
+  };
+}
+
+/**
+ * 按钮/文本邀请统一入口：
+ * - 舞蹈事件已在进行 → 直接起舞（换舞装中则提示稍等）
+ * - 未在事件中 → 登记「待角色回应」的舞蹈请求
+ * @returns true = 本条请求已由系统直接处理（不再发对话）
+ */
+export function requestPlayerDance(characterId: string, mode: 'solo' | 'co'): boolean {
+  let started = false;
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    const s = getDanceSession(living);
+    if (s?.active && s.characterId === characterId) {
+      if (s.phase === 'dressing' || s.phase === 'unveil' || s.phase === 'travel') {
+        s.mode = mode;
+        living.danceUiFlash =
+          s.phase === 'travel'
+            ? `【系统】还在去大厅的路上，到了就${mode === 'co' ? '一起跳' : '跳'}。`
+            : s.phase === 'unveil'
+              ? `【系统】正在换演出服，马上${mode === 'co' ? '一起跳' : '跳'}。`
+              : `【系统】${mode === 'co' ? '一起跳' : '跳一段'}要等换好舞装——马上就好。`;
+        started = true;
+        return;
+      }
+      const ok = mode === 'co'
+        ? beginCoDance(d, living, characterId)
+        : beginSoloDance(d, living, characterId);
+      const after = getDanceSession(living);
+      living.danceUiFlash = ok
+        ? after?.phase === 'unveil'
+          ? '【系统】正在换演出服，马上起舞。'
+          : `【系统】${mode === 'co' ? '共舞开始' : '独舞开始'}。`
+        : '【系统】起舞失败：缺少舞蹈资源。';
+      started = true;
+    } else {
+      setPlayerDanceAsk(living, characterId, mode);
+    }
+    d.aiLiving = living;
+  });
+  return started;
+}
+
+/** 关闭对话＝玩家离开：刚被叫醒又没人陪，她会窝回去睡（好感 -1，营日志可见） */
+export function settleSleepOnDialogueClose(characterId: string): boolean {
+  let sleptBack = false;
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    sleptBack = sleepBackIfLeftAloneAfterWake(living, characterId);
+    d.aiLiving = living;
+  });
+  return sleptBack;
+}
+
+/** 换舞装到点：dressing → 待机（UI 心跳兜底，不等下一轮对话） */
+export function finishDanceDressingNow(): { characterId: string; systemLine: string } | null {
+  let out: { characterId: string; systemLine: string } | null = null;
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    const s = getDanceSession(living);
+    if (!s || s.phase !== 'dressing') return;
+    if (Date.now() < (s.dressReadyAtMs ?? 0)) return;
+    const line = finishDanceDressing(d, living, s.characterId);
+    if (line) out = { characterId: s.characterId, systemLine: line };
+    d.aiLiving = living;
+  });
+  return out;
+}
+
+/** 起舞过渡到点：换好演出服 → dancing（音乐随之开始） */
+export function finishDanceUnveilNow(): { characterId: string; systemLine: string } | null {
+  let out: { characterId: string; systemLine: string } | null = null;
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    const s = getDanceSession(living);
+    if (!s || s.phase !== 'unveil') return;
+    if (Date.now() < (s.unveilUntilMs ?? 0)) return;
+    if (finishDanceUnveil(d, living, s.characterId)) {
+      const modeLabel = s.mode === 'co' ? '共舞' : '独舞';
+      out = { characterId: s.characterId, systemLine: `【系统】${modeLabel}开始。` };
+    }
+    d.aiLiving = living;
+  });
+  return out;
+}
+
+/** 只是停下休息：回舞蹈待机，舞蹈事件继续 */
+export function stopDanceNow(): string {
+  let line = '';
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    const s = getDanceSession(living);
+    if (!s) return;
+    if (s.phase === 'dancing') {
+      returnToPrepare(d, living, s.characterId);
+      line = '【系统】停下休息，回到舞蹈待机（事件仍在，可以再开始）。';
+    }
+    d.aiLiving = living;
+  });
+  return line;
+}
+
+/** 结束舞蹈事件：换下舞装 + 离开大厅 */
+export function endDanceNow(): string {
+  let line = '';
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    if (!getDanceSession(living)) return;
+    const r = leaveDanceSession(d, living, { reason: '指挥官结束舞蹈' });
+    line = r.systemLine ?? '【系统】舞蹈已结束。';
+    d.aiLiving = living;
+  });
+  return line;
+}
+
+export function acceptPendingDanceInviteNow(): boolean {
+  let ok = false;
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    const r = acceptDanceInvite(d, living);
+    ok = r.ok;
+    if (r.systemLine) living.danceUiFlash = r.systemLine;
+    d.aiLiving = living;
+  });
+  return ok;
+}
+
+export function rejectPendingDanceInviteNow(): void {
+  mutateAiLiving((living) => {
+    rejectDanceInvite(living);
+  });
+}
+
+export function takeDanceUiFlash(): string | null {
+  let text: string | null = null;
+  mutateAiLiving((living) => {
+    if (living.danceUiFlash) {
+      text = living.danceUiFlash;
+      living.danceUiFlash = undefined;
+    }
+  });
+  return text;
+}
+
+/* ================= 小游戏（聊天界面「游戏」按钮：五子棋/猜拳） ================= */
+
+/** 对话 UI：游戏按钮可见性 + 当前对局状态 */
+export function observeMiniGameStateForUi(characterId: string): {
+  available: boolean;
+  active: boolean;
+  kind: MiniGameKind | null;
+  turn: 'player' | 'ai' | null;
+  remainMs: number;
+  pendingInvite: boolean;
+  pendingInviteKind: MiniGameKind | null;
+  stakeWinner: 'player' | 'ai' | null;
+} {
+  const living = getAiLiving();
+  const s = living.miniGameSession;
+  const mine = s?.active && s.characterId === characterId ? s : null;
+  const stake = living.miniGameStake;
+  return {
+    available: canShowMiniGameButtons(living, characterId),
+    active: Boolean(mine),
+    kind: (mine?.kind ?? null) as MiniGameKind | null,
+    turn: (mine?.turn ?? null) as 'player' | 'ai' | null,
+    remainMs: mine ? Math.max(0, mine.turnDeadlineMs - Date.now()) : 0,
+    pendingInvite: living.pendingMiniGameInvite?.characterId === characterId,
+    pendingInviteKind: living.pendingMiniGameInvite?.characterId === characterId
+      ? (living.pendingMiniGameInvite?.kind ?? null)
+      : null,
+    stakeWinner: stake && stake.characterId === characterId ? stake.winner : null,
+  };
+}
+
+/**
+ * 按钮邀请统一入口：登记「待角色回应」的小游戏请求（等角色本轮答复）。
+ * 已在该角色对局中 → 不再发对话，由面板直接交互。
+ * @returns true = 已在该角色对局中（系统直接处理）
+ */
+export function requestPlayerMiniGame(characterId: string, kind: MiniGameKind): boolean {
+  let inGame = false;
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    if (isMiniGameActiveFor(living, characterId)) {
+      inGame = true;
+      return;
+    }
+    setPlayerMiniGameAsk(living, characterId, kind);
+    d.aiLiving = living;
+  });
+  return inGame;
+}
+
+/** 玩家落子（五子棋面板） */
+export function miniGameGomokuMoveNow(idx: number): { ok: boolean; msg: string; systemLine?: string } {
+  let out: { ok: boolean; msg: string; systemLine?: string } = { ok: false, msg: '未在对局中' };
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    out = playerGomokuMove(d, living, idx);
+    d.aiLiving = living;
+  });
+  return out;
+}
+
+/** 玩家出拳（猜拳面板） */
+export function miniGameRpsThrowNow(playerThrow: RpsThrow): { ok: boolean; msg: string; systemLine?: string } {
+  let out: { ok: boolean; msg: string; systemLine?: string } = { ok: false, msg: '未在对局中' };
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    out = playerRpsThrow(d, living, playerThrow);
+    d.aiLiving = living;
+  });
+  return out;
+}
+
+/** 玩家中途退出/关闭对话：判负 + 扣好感 */
+export function quitMiniGameNow(reason: string): string {
+  let line = '';
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    if (!getMiniGameSession(living)) return;
+    const r = quitMiniGameByPlayer(d, living, reason);
+    line = r.systemLine ?? '【系统】对局已结束（你中途退出，判负）。';
+    d.aiLiving = living;
+  });
+  return line;
+}
+
+export function acceptPendingMiniGameInviteNow(): boolean {
+  let ok = false;
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    const r = acceptMiniGameInvite(d, living);
+    ok = r.ok;
+    if (r.systemLine) living.miniGameUiFlash = r.systemLine;
+    d.aiLiving = living;
+  });
+  return ok;
+}
+
+export function rejectPendingMiniGameInviteNow(): void {
+  mutateAiLiving((living) => {
+    rejectMiniGameInvite(living);
+  });
+}
+
+export function takeMiniGameUiFlash(): string | null {
+  let text: string | null = null;
+  mutateAiLiving((living) => {
+    if (living.miniGameUiFlash) {
+      text = living.miniGameUiFlash;
+      living.miniGameUiFlash = undefined;
+    }
+  });
+  return text;
+}
+
+/** 面板重绘用：读取当前对局完整状态（只读快照；含刚结算完的终局态，供结果横幅显示） */
+export function getMiniGameSnapshotForUi(): {
+  characterId: string;
+  kind: MiniGameKind;
+  active: boolean;
+  turn: 'player' | 'ai';
+  remainMs: number;
+  gomoku?: { board: number[]; lastMove: number | null };
+  rps?: {
+    round: number;
+    playerWins: number;
+    aiWins: number;
+    lastPlayerThrow: string | null;
+    lastAiThrow: string | null;
+    lastRoundOutcome: number | null;
+  };
+  result: 'player_win' | 'ai_win' | 'draw' | null;
+  resultReason?: string;
+} | null {
+  const living = getAiLiving();
+  const s = living.miniGameSession;
+  if (!s?.characterId) return null;
+  if (!s.active && !s.result) return null;
+  return {
+    characterId: s.characterId,
+    kind: s.kind,
+    active: s.active === true,
+    turn: s.turn,
+    remainMs: s.active ? Math.max(0, s.turnDeadlineMs - Date.now()) : 0,
+    gomoku: s.gomoku
+      ? { board: s.gomoku.board.slice(), lastMove: s.gomoku.lastMove ?? null }
+      : undefined,
+    rps: s.rps
+      ? {
+          round: s.rps.round,
+          playerWins: s.rps.playerWins,
+          aiWins: s.rps.aiWins,
+          lastPlayerThrow: s.rps.lastPlayerThrow ?? null,
+          lastAiThrow: s.rps.lastAiThrow ?? null,
+          lastRoundOutcome: s.rps.lastRoundOutcome ?? null,
+        }
+      : undefined,
+    result: s.result ?? null,
+    resultReason: s.resultReason,
+  };
+}
+
+/** 赛后约定状态（面板提示用） */
+export function getMiniGameStakeForUi(characterId: string): { winner: 'player' | 'ai'; kind: MiniGameKind } | null {
+  const living = getAiLiving();
+  const stake = living.miniGameStake;
+  if (!stake || stake.characterId !== characterId) return null;
+  return { winner: stake.winner, kind: stake.kind };
+}
+
+export { miniGameKindLabel };
+
+/* ================= 浴室互动（聊天界面「洗浴」按钮） ================= */
+
+/** 对话 UI：浴室按钮可见性 + 当前会话状态 */
+export function observeBathStateForUi(characterId: string): {
+  available: boolean;
+  active: boolean;
+  mode: 'help_wash' | 'co_bath' | null;
+  pendingInvite: boolean;
+  pendingAsk: boolean;
+} {
+  const living = getAiLiving();
+  const s = getBathAssistSession(living);
+  return {
+    available: canShowBathButtons(living, characterId),
+    active: Boolean(s && s.characterId === characterId),
+    mode: s && s.characterId === characterId ? s.mode : null,
+    pendingInvite: living.pendingBathAssistInvite?.characterId === characterId,
+    pendingAsk: living.pendingPlayerBathAssistAsk?.characterId === characterId,
+  };
+}
+
+/**
+ * 指挥官点「帮我（指挥官冲澡）」「一同泡澡」：登记待回应，等角色答复。
+ * @returns true = 事件已在进行并直接切换（本轮不再发对话）
+ */
+export function requestPlayerBathAssist(
+  characterId: string,
+  mode: 'help_wash' | 'co_bath',
+): boolean {
+  let started = false;
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    const s = getBathAssistSession(living);
+    if (s?.active && s.characterId === characterId) {
+      // 已在浴室互动中：直接切模式（帮洗 ⇄ 共浴）
+      if (s.mode !== mode) {
+        const r = enterBathAssistSession(d, living, characterId, mode, 'player_button');
+        if (r.ok) {
+          living.bathAssistUiFlash = r.systemLine ?? r.msg;
+          started = true;
+        }
+      } else {
+        started = true;
+      }
+      d.aiLiving = living;
+      return;
+    }
+    setPlayerBathAssistAsk(living, characterId, mode);
+    d.aiLiving = living;
+  });
+  return started;
+}
+
+/** 指挥官点「帮我（指挥官冲澡）」「一同泡澡」时发出的口语请求（与打字/语音等效） */
+export function buildPlayerBathAskText(mode: 'help_wash' | 'co_bath'): string {
+  return buildBathAssistPlayerProposeMessage(mode);
+}
+
+export function acceptPendingBathAssistInviteNow(): boolean {
+  let ok = false;
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    const r = acceptBathAssistInvite(d, living);
+    ok = r.ok;
+    if (r.systemLine) living.bathAssistUiFlash = r.systemLine;
+    d.aiLiving = living;
+  });
+  return ok;
+}
+
+export function rejectPendingBathAssistInviteNow(): void {
+  mutateAiLiving((living) => {
+    rejectBathAssistInvite(living);
+  });
+}
+
+export function takeBathAssistUiFlash(): string | null {
+  let text: string | null = null;
+  mutateAiLiving((living) => {
+    if (living.bathAssistUiFlash) {
+      text = living.bathAssistUiFlash;
+      living.bathAssistUiFlash = undefined;
+    }
+  });
+  return text;
+}
+
+/** 帮洗前的「先换浴巾」准备倒计时到点：切帮洗立绘 */
+export function finishBathAssistPrepareNow(): string | null {
+  let line: string | null = null;
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    const r = tryCompleteBathAssistPrepare(d, living);
+    if (r) line = r.systemLine ?? r.msg;
+    d.aiLiving = living;
+  });
+  return line;
+}
+
+/** 聊天 UI：玩家文字/语音里提出帮洗/共浴时登记待回应（与按钮等效） */
+export function registerPlayerBathAskFromText(
+  living: AiLivingSave,
+  characterId: string,
+  playerMessage: string,
+): void {
+  if (!canShowBathButtons(living, characterId)) return;
+  const mode = detectPlayerBathAssistMode(playerMessage);
+  if (!mode) return;
+  setPlayerBathAssistAsk(living, characterId, mode);
+}
+
+/** 对话 UI：独舞循环片段列表（主循环 + _1/_2…），供无缝循环播放 */
+export function getDanceSoloClips(characterId: string): string[] {
+  return getDanceSoloClipList(characterId);
+}
+
+/** 安抚室 UI 门面：状态观察（按钮显隐/进度条/邀请条共用） */
+export function observeAnfuStateForUi(characterId: string): {
+  active: boolean;
+  phase: 'dressing' | 'travel' | 'standby' | 'soothing' | 'exhausted' | null;
+  value: number;
+  clipIndex: number;
+  attackCoolingMs: number;
+  awaitingReply: boolean;
+  hasAssets: boolean;
+  pendingInvite: boolean;
+  playedToday: boolean;
+} {
+  const living = getAiLiving();
+  const s = living.anfuSession;
+  const mine = s?.active && s.characterId === characterId ? s : null;
+  const cooling = mine
+    ? Math.max(0, 10_000 - (Date.now() - mine.lastAttackAtMs))
+    : 0;
+  return {
+    active: Boolean(mine),
+    phase: (mine?.phase ?? null) as 'dressing' | 'travel' | 'standby' | 'soothing' | 'exhausted' | null,
+    value: mine?.value ?? 0,
+    clipIndex: mine?.clipIndex ?? 0,
+    attackCoolingMs: cooling,
+    awaitingReply: Boolean(mine?.awaitingAttackReply),
+    hasAssets: canShowAnfuButtons(living, characterId),
+    pendingInvite: living.pendingAnfuInvite?.characterId === characterId,
+    playedToday: living.anfuPlayDay?.[characterId] === living.dayIndex,
+  };
+}
+
+/** 安抚按钮统一入口：登记「待角色回应」的安抚请求 */
+export function requestPlayerAnfu(characterId: string): void {
+  mutateAiLiving((living) => {
+    setPlayerAnfuAsk(living, characterId);
+  });
+}
+
+export function acceptPendingAnfuInviteNow(): boolean {
+  let ok = false;
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    const r = acceptAnfuInvite(d, living);
+    ok = r.ok;
+    if (r.systemLine) living.anfuUiFlash = r.systemLine;
+    d.aiLiving = living;
+  });
+  return ok;
+}
+
+export function rejectPendingAnfuInviteNow(): void {
+  mutateAiLiving((living) => {
+    rejectAnfuInvite(living);
+  });
+}
+
+export function takeAnfuUiFlash(): string | null {
+  let text: string | null = null;
+  mutateAiLiving((living) => {
+    if (living.anfuUiFlash) {
+      text = living.anfuUiFlash;
+      living.anfuUiFlash = undefined;
+    }
+  });
+  return text;
+}
+
+/**
+ * 棉花攻击按钮统一入口：切片段 + 置锁等模型回。
+ * 返回 clipSrc 供 UI 先切画面、attackText 供 UI 发给模型（含部位/缠绕/姿势）；
+ * 数值等本轮模型返回 anfu_gain 后落盘。
+ */
+export function requestAnfuAttackNow(
+  characterId: string,
+): { ok: boolean; msg: string; clipSrc?: string; clipIndex?: number; attackText?: string } {
+  let out: { ok: boolean; msg: string; clipSrc?: string; clipIndex?: number; attackText?: string } = {
+    ok: false,
+    msg: '不在安抚中',
+  };
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    const r = requestAnfuAttack(d, living, characterId);
+    out = { ...r, attackText: buildAnfuAttackPlayerText(living, characterId) ?? undefined };
+    d.aiLiving = living;
+  });
+  return out;
+}
+
+/** 换装完成推进（黑屏/对话轮后调用，幂等） */
+export function finishAnfuDressingNow(characterId: string): boolean {
+  let ok = false;
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    ok = finishAnfuDressing(d, living, characterId);
+    d.aiLiving = living;
+  });
+  return ok;
+}
+
+/** 对话 UI：安抚过程片段列表（按攻击顺序播） */
+export function getAnfuClips(characterId: string): string[] {
+  return getAnfuClipList(characterId);
+}
+
+/** 对话 UI：直接进入安抚（邀请已确认路径复用） */
+export function enterAnfuNow(
+  characterId: string,
+): { ok: boolean; msg: string; systemLine?: string } {
+  let out: { ok: boolean; msg: string; systemLine?: string } = { ok: false, msg: '' };
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    out = enterAnfuSession(d, living, characterId, 'player_button');
+    if (out.systemLine) living.anfuUiFlash = out.systemLine;
+    d.aiLiving = living;
+  });
+  return out;
+}
+
+/** 对话 UI：离开安抚室（按 phase 分流语义） */
+export function leaveAnfuNow(
+  reason: 'leave' | 'close' = 'leave',
+): { ok: boolean; msg: string; systemLine?: string } {
+  let out: { ok: boolean; msg: string; systemLine?: string } = { ok: false, msg: '' };
+  saveManager.mutate((d) => {
+    const living = ensureLiving(d);
+    out = leaveAnfuSession(d, living, { reason });
+    if (out.systemLine) living.anfuUiFlash = out.systemLine;
+    d.aiLiving = living;
+  });
+  return out;
 }
 
 export function takeOfflineBanner(): string | null {

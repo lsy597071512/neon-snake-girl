@@ -1,8 +1,11 @@
 # 锈带纪元 · 开发者文档索引
 
+> **第一宗旨（最高优先级）：让游戏中的角色，真实地生活在游戏的世界里。**
+> 上线前必读 [ai-first-principle.md](./ai-first-principle.md)：活人定律、玩家在线/离线模型、硬性玩法事件的现实内核、需求冲突的指认流程。任何 AI 改动都必须先过其自检清单。
+
 > **目的**：让下一个接手本项目的 AI Agent 或开发者，能在 30 分钟内读懂项目全貌并开始工作。  
 > **入口**：本文档 + `docs/ai-sleep-system.md` 等专项文档。  
-> **最新更新**：2026-09-06
+> **最新更新**：2026-10-21（首屏立「第一宗旨」）
 
 ---
 
@@ -11,6 +14,7 @@
 **锈带纪元（Rust Belt Era）** —— 末日废土机械少女养成游戏。
 
 - **核心玩法**：战斗（Three.js 3D 跑酷）+ AI 营地生活（角色自主行动、记忆、关系演化）
+- **设计宗旨**：角色不是功能开关，而是**真实生活在游戏世界里的人**；玩家离线＝指挥官离开/睡觉，世界继续走
 - **目标用户**：成人向 / 二次元 / AI 陪伴爱好者
 - **技术路线**：前端直连阿里云 DashScope（玩家自备 Key），零服务器 AI 成本
 - **发布形态**：Web + Android APK（Capacitor）
@@ -25,7 +29,7 @@
 | `src/ai/` | AI 生活系统核心 |
 | `src/ai/campEvents/` | 营地随机事件引擎 |
 | `src/ai/voice/` | 语音系统（ASR/TTS） |
-| `src/game/` | Phaser 3D 战斗场景 |
+| `src/game/` | Three.js 3D 战斗场景（`Combat3D.ts` 主力；`CombatScene.ts` 为 Phaser 遗留降级备胎） |
 | `src/systems/` | 游戏系统（成就、军械箱、扫荡等） |
 | `src/core/` | 存档管理、数值公式 |
 | `src/data/` | 静态配置（角色、武器、关卡等） |
@@ -67,8 +71,8 @@
 | 对话档案 | `dialogueArchive.ts` | IndexedDB 永久存储，支持关键词检索 |
 | Prompt 组装 | `promptAssembler.ts` | 组装系统提示词（世界观/角色/营地/时间/记忆等） |
 | AI 人设 | `aiProfiles.ts` | 从 JSON 加载详细人设（coreNeeds/fears/speechStyle 等） |
-| 调教系统 | `disciplineSession.ts` | 小黑屋会话状态机、姿势系统、约束皮状态 |
-| 成人事件 | `adultEvents.ts` / `bodySensitivity.ts` | 脱浴巾+小黑屋总层；身体敏感点与机油 |
+| 事件会话（已下线） | `disciplineSession.ts` | 惰性占位；该玩法不在市场版 |
+| 亲密氛围 | `adultEvents.ts` / `bodySensitivity.ts` | 浴室亲近总层；亲近区与机体渗出 |
 
 ### 游戏系统（`src/systems/`、`src/core/`）
 
@@ -135,7 +139,7 @@ VITE_QWEN_SUMMARY_MODEL=
 
 | 依赖 | 版本 | 用途 |
 |---|---|---|
-| **phaser** | ^3.80.1 | 3D 战斗引擎 |
+| **phaser** | ^3.80.1 | 遗留 2D 战斗备胎（默认不启用） |
 | **three** | ^0.184.0 | 3D 渲染 |
 | **@capacitor/core** | ^8.4.1 | 移动端框架 |
 | **@fontsource/noto-sans-sc** | ^5.2.9 | 中文字体 |
@@ -160,10 +164,10 @@ VITE_QWEN_SUMMARY_MODEL=
 | **[ai-desires.md](./ai-desires.md)** | AI 系统开发者 | 欲望/议程系统 |
 | **[ai-life-goals.md](./ai-life-goals.md)** | AI 系统开发者 | 人生目标系统 |
 | **[ai-structured-facts.md](./ai-structured-facts.md)** | AI 系统开发者 | 结构化事实/关系弧线 |
-| **[discipline-event.md](./discipline-event.md)** | AI + 美术 | 小黑屋调教 |
+| **[copy-scale-standard.md](./copy-scale-standard.md)** | 策划 + AI + 美术 | **绯月级文案尺度规范**（三层词表 / Prompt 与固定文案落地） |
 | **[character-skins.md](./character-skins.md)** | 美术 + 程序 | 皮肤资源规范 |
 | **[camp-layout.md](./camp-layout.md)** | AI + 策划 | 营地房间/地标 |
-| **[asset-ship-pipeline.md](./asset-ship-pipeline.md)** | 所有人 | 打包/资源管理 |
+| **[asset-ship-pipeline.md](./asset-ship-pipeline.md)** | 所有人 | 打包/资源管理/**Android 签名与热更（强制）** |
 | **[combat-system.md](./combat-system.md)** | 战斗开发者 | Three.js 战斗 |
 | **[combat-vfx-spec.md](./combat-vfx-spec.md)** | 战斗开发者 | 战斗特效/打击感 |
 | **[ui-system.md](./ui-system.md)** | UI 开发者 | UI 布局/CSS |
@@ -216,9 +220,10 @@ VITE_QWEN_SUMMARY_MODEL=
 
 | 问题 | 严重度 | 备注 |
 |---|---|---|
+| 存档仅本地，无导入导出 | 中 | 兜底手段，正式发售前再做（见 `docs/save-system.md`） |
 | 无单元测试 | 高 | `dialogueEngine` / `memory` 等核心无回归保护 |
 | 无 ESLint/Prettier | 中 | 代码风格不一致 |
-| `App.ts` 上帝文件（~2000 行） | 中 | 建议按"对话域/营地域/皮肤域"拆模块 |
+| `App.ts` 上帝文件（~3300 行 / 128KB） | 中 | 建议按"对话域/营地域/皮肤域"拆模块 |
 | 无 i18n | 中 | 中文硬编码，海外市场需重构 |
 | 静默吞错 100+ 处 | 中 | 建议统一错误处理 |
 | AdMob 测试 ID | 高 | 正式发布前需替换 |
@@ -235,8 +240,16 @@ npm run dev
 # 构建 Web
 npm run build
 
-# 构建 Android APK
+# 构建 Android APK（调试包，debug 签名，仅自测）
 npm run build:apk
+
+# 构建 Android APK（发布包，唯一可分发给玩家的产物）
+# 自动完成签名 + 指纹验签；换电脑只要 keystore 在，就必然可覆盖安装
+npm run build:apk:release
+
+# 签名初始化 / 指纹核对（换电脑时用）
+npm run android:signing:init
+npm run android:signing:check
 
 # 打包 ship 资源（必须）
 npm run assets:build-ship

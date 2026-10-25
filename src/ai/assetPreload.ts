@@ -58,6 +58,9 @@ export function preloadSkinAssets(characterId: string, skinId: string | null): v
     if (!skin) return;
     if (skin.portraitLive) preloadVideo(skin.portraitLive);
     for (const sec of skin.portraitLiveSecondaries?.slice(0, 2) ?? []) preloadVideo(sec);
+    for (const loop of skin.portraitLiveSecondaryLoops ?? []) {
+      if (loop) preloadVideo(loop);
+    }
     const still = skin.portraits?.[0];
     if (still) preloadImage(still);
   } catch {

@@ -10,8 +10,11 @@ import {
   getCharacterSkins,
   getActiveSkinAiLookNote,
   getUnlockedSkinsAiNote,
+  BATH_CO_SKIN_ID,
+  BATH_HELP_SKIN_ID,
+  BATH_SOLO_SKIN_ID,
+  isAloneBathSkinId,
   OUTFIT_CHANGE_SKIN_ID,
-  SHOWER_SKIN_ID,
 } from '../data/characterSkins';
 import { getCharacterPosters } from '../data/characterPosters';
 import { WEAPON_MAP } from '../data/weapons';
@@ -20,6 +23,7 @@ import { WORLD_INTRO_TITLE } from '../data/worldIntro';
 import { getCharacterSleepRoom } from '../data/campLayout';
 import { getAiProfile, getVoicePromptLine } from './aiProfiles';
 import { getBathIntimateConsent, getBathIntimateIntroDone } from './bathIntimateConsent';
+import { getBathAssistSession } from './bathAssistSession';
 import { getCampDisplaySkinId } from './campOutfit';
 import { resolvePresence } from './livingState';
 import { describeAffinity, getAffinity } from './relationship';
@@ -167,7 +171,7 @@ export function buildLiveCharacterSnapshot(
 
   const lookNote = getActiveSkinAiLookNote(characterId, activeSkinId);
   const intimateOn =
-    activeSkinId === SHOWER_SKIN_ID && getBathIntimateConsent(living, characterId);
+    isAloneBathSkinId(activeSkinId) && getBathIntimateConsent(living, characterId);
   const liveVisNote =
     intimateOn && skin?.aiIntimateLiveNote
       ? skin.aiIntimateLiveNote
@@ -176,21 +180,37 @@ export function buildLiveCharacterSnapshot(
         : '';
   // 出征一律默认甲；营内特别外覆不带上锈带。主页玩家装备与营地穿搭分离。
   const combatNote = skinIsProcess
-    ? `此刻是换装过程立绘，不是定装；出征仍用默认装甲。主页看板娘外观由指挥官另选，与你营地穿搭无关。`
+    ? `玩家当前画面明确是「换装过程」立绘，不是生活服装或定装；出征仍用默认装甲。`
     : activeSkinId
-      ? `营内正穿着「${skin?.name ?? '特别外覆'}」；出征时用默认装甲上阵，勿声称穿着泳装/睡衣/浴巾进锈带。主页看板娘外观由指挥官另选，与你营地穿搭无关。`
-      : `此刻穿着默认战斗装甲（仅执勤/军械/室外干活或你主动想穿时）；营地日常基准是生活服装。出征亦用装甲。主页看板娘外观由指挥官另选，与你营地穿搭无关。`;
+      ? `玩家当前画面明确是营地特别外覆「${skin?.name ?? '特别外覆'}」；不能称为生活服装，也不能描述未显示的其他皮肤。出征时才用默认装甲。`
+      : `玩家当前画面明确是默认战斗装甲原皮，不是生活服装；当前地点虽在营地，也不能把画面说成生活服装。出征同样用默认装甲。`;
   const posterNote = posters
     ? `档案海报可能是默认造型；营地对话立绘以当前营地外观「${skin?.name ?? '默认外观'}」为准。`
     : `无独立海报档案时，仍以当前营地立绘为准。`;
-  const bathVis =
-    activeSkinId === SHOWER_SKIN_ID
-      ? intimateOn
-        ? getBathIntimateIntroDone(living, characterId)
+  const bathVis = isAloneBathSkinId(activeSkinId)
+    ? intimateOn
+      ? activeSkinId === BATH_SOLO_SKIN_ID || !skin?.portraitLiveIntimateIntro
+        ? '玩家此刻所见：已脱掉浴巾的独自泡澡循环（无巾泡缸）。'
+        : getBathIntimateIntroDone(living, characterId)
           ? '玩家此刻所见：已脱掉浴巾的成人冲澡动态（循环）。'
           : '玩家此刻所见：正在播放脱掉浴巾的过渡动态，随后切无巾冲澡循环。'
+      : activeSkinId === BATH_SOLO_SKIN_ID
+        ? '玩家此刻所见：独自泡澡循环（仍裹浴巾；尚未脱掉浴巾）。指挥官不在同缸。'
         : '玩家此刻所见：冲澡待机动态（仍裹浴巾；尚未脱掉浴巾）。'
-      : '';
+    : activeSkinId === BATH_HELP_SKIN_ID
+      ? '玩家此刻所见：裹着白浴巾帮指挥官清洗的循环动态（不是帮洗制服）。'
+      : activeSkinId === BATH_CO_SKIN_ID
+        ? '玩家此刻所见：一同泡澡循环动态（与指挥官已在同一浴缸共浴）。'
+        : '';
+  const assist = living ? getBathAssistSession(living) : null;
+  const assistVis =
+    assist?.active && assist.characterId === characterId
+      ? assist.mode === 'help_wash'
+        ? '当前浴室互动：帮指挥官清洗中（裹浴巾帮洗）；指挥官已在现场。'
+        : '当前浴室互动：一同泡澡中；指挥官已在浴缸里与你同浴，禁止说他还没来。'
+      : isAloneBathSkinId(activeSkinId)
+        ? '当前为独自泡澡/洗浴（非帮洗、非共浴）；指挥官若提出一同泡澡并经你同意，会切共浴皮。'
+        : '';
   const changeVis = skinIsProcess
     ? '玩家此刻所见：换装过程循环动态（遮布/衣柜）；尚未换完目标外覆。'
     : '';
@@ -200,6 +220,7 @@ export function buildLiveCharacterSnapshot(
       lookNote || '此刻穿着默认战斗/日常装甲。',
       liveVisNote,
       bathVis,
+      assistVis,
       changeVis,
       combatNote,
       posterNote,
@@ -268,6 +289,11 @@ export function liveCharacterSnapshotToPromptBlock(snap: LiveCharacterSnapshot):
   const lookNote = getActiveSkinAiLookNote(snap.characterId, snap.activeSkinId);
 
   const sleep = getCharacterSleepRoom(snap.characterId);
+  const combatNote = snap.skinIsEventTemp
+    ? `玩家当前画面明确是营地事件临时外覆「${snap.activeSkinName}」，不能用生活服装或默认装甲替代。`
+    : snap.activeSkinId
+      ? `玩家当前画面明确是营地外覆「${snap.activeSkinName}」，不能描述未显示的其它皮肤。`
+      : '玩家当前画面明确是默认战斗装甲原皮，不是生活服装。';
   return `【自我认知·存档实时同步】（问外形/武装/战力/礼物/年纪时必须按本卡；禁止说不知道或瞎编）
 姓名：${snap.name}（${snap.rarity}｜${snap.tag}）
 看起来：${snap.age}｜身高 ${snap.height}｜三围 ${snap.measurements}
@@ -280,8 +306,9 @@ export function liveCharacterSnapshotToPromptBlock(snap: LiveCharacterSnapshot):
 当前外观：${snap.activeSkinName}${snap.skinIsEventTemp ? '（事件临时）' : ''}${skinExtra}${skinsAvail ? `（衣柜：${skinsAvail}）` : ''}
 ${lookNote ? `换装观感：${lookNote}` : ''}
 ${wardrobeNote}
+【玩家当前画面优先】${combatNote} 若玩家问「你现在穿的是什么」，先回答玩家眼前这套画面，不要用营地默认穿搭规则替代当前外观。
 【衣装术语·禁止混称】「营地装/营地标配/营地日常」=生活服装 pifu00（居家休闲，不是装甲）；「星夜睡衣」=pifu02；「默认战斗装甲/装甲/原皮」=default（仅执勤军械室外干活，不是营地日常默认）。禁止把睡衣/泳装/装甲说成营地标配。
-【换装规则】营地日常默认生活服装(pifu00)。换衣服要有过程：答应后立绘切「换装中」过程动态循环，换好后才按新衣说话。默认装甲仅主动/执勤军械/室外干活。蒸汽毛巾仅洗浴。出征默认装甲。
+【换装规则】营地日常默认生活服装(pifu00)。换衣服要有过程：答应后立绘切「换装中」过程动态循环，换好后才按新衣说话。默认装甲仅主动/执勤军械/室外干活。独自泡澡(pifu09)/蒸汽毛巾仅洗浴。出征默认装甲。
 武装：${snap.weaponName ? `${snap.weaponName}` : '未装备武器'}${snap.skillName ? `｜技能「${snap.skillName}」${snap.skillDesc ? `：${snap.skillDesc}` : ''}` : ''}
 战力：约 ${snap.power}
 礼物：偏好「${snap.giftPreference}」｜已收 ${snap.giftCount} 件

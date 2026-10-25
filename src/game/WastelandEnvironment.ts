@@ -11,6 +11,9 @@ import {
   applyWorldSpaceRoadUvs,
   getRoadTextureAspect,
 } from './textureUtils';
+
+/** ship manifest 缺失时回退的原始路面路径 */
+const COMBAT_ROAD_TEXTURE_FALLBACK = './tex/changjing/road01.png';
 import { texUrl } from '../utils/texUrl';
 import { getBuildSideMaterial, warmupCombatBuildModels } from './combatBuildLoader';
 import { warmupCombatPropModels } from './combatPropsLoader';
@@ -362,19 +365,42 @@ export class WastelandEnvironment {
   }
 
   private loadCombatRoadTexture(): void {
-    this.loader.load(
-      texUrl(COMBAT_ROAD_TEXTURE),
-      (tex) => {
-        configureCombatRoadTexture(tex);
-        this.roadTex.dispose();
-        this.roadTex = tex;
-        this.applyRoadTextureToDimian(tex);
-      },
-      undefined,
-      () => {
-        /* 加载失败时保留程序化路面 */
-      },
-    );
+    const onOk = (tex: THREE.Texture) => {
+      configureCombatRoadTexture(tex);
+      this.roadTex.dispose();
+      this.roadTex = tex;
+      this.applyRoadTextureToDimian(tex);
+      if (typeof window !== 'undefined') {
+        (window as Window & { __combatRoad?: string }).__combatRoad = 'loaded';
+      }
+    };
+    const onFail = (reason: string) => {
+      // 贴图缺失/解码失败时程序化路面是唯一兜底，但它在低端机 ACES 下偏暗，
+      // 不提亮的话玩家看到的就是一片黑，误判为"贴图丢失"
+      console.warn(`[combat-road] ${reason}; falling back to procedural road`);
+      if (this.dimian01Mat) {
+        this.dimian01Mat.color.set(0x9aa0a6);
+        this.dimian01Mat.needsUpdate = true;
+      }
+      if (this.dimian02Mat) {
+        this.dimian02Mat.color.set(0xb8a890);
+        this.dimian02Mat.needsUpdate = true;
+      }
+      if (typeof window !== 'undefined') {
+        (window as Window & { __combatRoad?: string }).__combatRoad = 'procedural-fallback';
+      }
+    };
+
+    this.loader.load(texUrl(COMBAT_ROAD_TEXTURE), onOk, undefined, () => {
+      // ship manifest 可能把 .png 映射成 .webp；映射缺失时退回原始文件名再试一次
+      if (texUrl(COMBAT_ROAD_TEXTURE) === texUrl(COMBAT_ROAD_TEXTURE_FALLBACK)) {
+        onFail(`missing ${COMBAT_ROAD_TEXTURE}`);
+        return;
+      }
+      this.loader.load(texUrl(COMBAT_ROAD_TEXTURE_FALLBACK), onOk, undefined, () => {
+        onFail(`missing ${COMBAT_ROAD_TEXTURE} and ${COMBAT_ROAD_TEXTURE_FALLBACK}`);
+      });
+    });
   }
 
   /** 建筑 spawn：按 footprint + 旋转贴路肩外侧，保证竖屏 FOV 内可见且不侵入主路 */

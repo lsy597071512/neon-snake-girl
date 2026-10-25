@@ -4,6 +4,19 @@
 
 ---
 
+## ⚠️ 第一宗旨（最高优先级）
+
+**让游戏中的角色，真实地生活在游戏的世界里。**
+
+- 玩家只在**在线时**存在：在线＝扮演指挥官在场；离线＝指挥官离开或睡觉，世界照常运转，角色继续过自己的日子。
+- 所有 AI 相关的新增 / 修改 / 优化**必须**围绕这条宗旨执行：角色可以拒绝、有作息与身体、做事要花时间、换衣有过程、打扰有代价、没有任何不可恢复的死锁。
+- 浴室 / 安抚 / 舞蹈 / 调教等硬性玩法事件同样适用：**玩法外壳可以确定，角色内核必须真实**。
+- 需求若违背现实生活逻辑，**先指出冲突并给替代方案**，不得默默执行。
+
+完整纲领与自检清单：**[docs/ai-first-principle.md](./docs/ai-first-principle.md)**（文档索引见 [docs/00-index.md](./docs/00-index.md)）。
+
+---
+
 ## 玩家 / 你自己游玩（无需 node_modules）
 
 **玩家永远不需要 `node_modules`。** 那是开发者工具，不是游戏本体。
@@ -39,6 +52,15 @@ npm run build        # 打包到 dist/，给玩家用
 
 - 文档：**[docs/asset-ship-pipeline.md](./docs/asset-ship-pipeline.md)**
 - 命令：`npm run build` / `npm run build:apk`（内含 build-ship + 门禁）
+
+### 发版打 APK（签名 release）
+
+**必读：[docs/apk-release-build.md](./docs/apk-release-build.md)** —— 签名指纹真源、四步可靠链路、安全软件实时扫描导致打包卡死的诊断与绕行。
+
+- 一条命令（安全软件已加信任区时）：`npm run build:apk:release`
+- 产物：`C:\Users\admin\Desktop\rust-belt-era-apk\rust-belt-era-release.apk`
+- AI Agent 可直接加载同内容的 Skill：[`skills/rust-belt-apk-release/SKILL.md`](./skills/rust-belt-apk-release/SKILL.md)
+- ⚠️ `npm run build:apk` 出的是 **debug 包**，签名不同，**禁止发给玩家**（覆盖安装失败、存档丢失）
 
 | 文件/目录 | 谁需要 | 说明 |
 |-----------|--------|------|

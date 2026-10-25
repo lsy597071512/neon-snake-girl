@@ -4,7 +4,7 @@
  * - 校验失败因断网 → 宽限放行（AI 功能本来就需要网络，损失可控）
  * - 网关地址支持多备用 + localStorage 'rb-gateway-urls' 临时覆盖（调试/换域名免重打包）
  */
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 
 /** 网关地址：部署后把你的 Worker 域名填在第一位（支持多个，按序尝试） */
 const GATEWAY_URLS: string[] = [
@@ -38,6 +38,11 @@ function gatewayUrls(): string[] {
     /* ignore */
   }
   return GATEWAY_URLS;
+}
+
+/** 网关地址列表（版本门等其它模块复用同一组备用网关 + override） */
+export function gatewayBaseUrls(): string[] {
+  return gatewayUrls();
 }
 
 /** 稳定设备 ID：原生用 Android ID（同签名重装不变）；Web 回退本地 UUID */
@@ -104,10 +109,22 @@ function readTokenAccount(): string | null {
 }
 
 async function postJson(url: string, path: string, body: unknown, timeoutMs = 12000): Promise<{ status: number; data: Record<string, unknown> }> {
+  const endpoint = url.replace(/\/$/, '') + path;
+  if (Capacitor.isNativePlatform()) {
+    const res = await CapacitorHttp.post({
+      url: endpoint,
+      headers: { 'Content-Type': 'application/json' },
+      data: body,
+      connectTimeout: timeoutMs,
+      readTimeout: timeoutMs,
+    });
+    return { status: res.status, data: (res.data ?? {}) as Record<string, unknown> };
+  }
+
   const ctrl = new AbortController();
   const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url.replace(/\/$/, '') + path, {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -239,13 +256,22 @@ export async function getLicenseState(): Promise<LicenseState> {
 /** 启动门禁：已登录 → true；未登录 → 弹「账号 + API Key」界面，成功后 resolve(true) */
 export async function ensureLicensed(): Promise<boolean> {
   let state = await getLicenseState();
-  if (state.licensed) return true;
+  if (state.licensed) {
+    // 老玩家：进游戏前补齐远端资源（无待下则秒过；玩家可跳过转后台下载）
+    const { showAssetDownloadOverlayIfNeeded } = await import('../ui/assetDownloadUi');
+    await showAssetDownloadOverlayIfNeeded();
+    return true;
+  }
 
   const { showLoginGate } = await import('../ui/loginGate');
   const activated = await showLoginGate(loginWithCode, selfUnbindDevices);
   if (!activated) return false;
   state = await getLicenseState();
-  return state.licensed;
+  if (!state.licensed) return false;
+  // 新激活玩家：登录成功后开始 P1/P2 批量下载（可跳过转后台）
+  const { showAssetDownloadOverlayIfNeeded } = await import('../ui/assetDownloadUi');
+  await showAssetDownloadOverlayIfNeeded();
+  return true;
 }
 
 /** 调试：临时覆盖网关地址（逗号分隔），免重打包 */

@@ -14,3 +14,6 @@ binding = "DB"
 database_name = "rust-belt-license"
 database_id = "05bde126-b979-4fdf-9a5a-dff5fc5ad576"
 
+# Backblaze B2 私有桶（P3 资源云分发，/assets/ 代理；免信用卡方案替代 R2）
+# Worker 通过 secret 访问：B2_KEY_ID / B2_APP_KEY（wrangler secret bulk 写入，勿写在仓库里）
+

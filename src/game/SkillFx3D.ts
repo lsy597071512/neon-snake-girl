@@ -58,6 +58,10 @@ interface ActiveShell {
    * 可选：旧版 spawn 没设；但 spawn 入口会补上，保持向后兼容。
    */
   origin?: { x: number; y: number; z: number };
+  /** 不透明度上限（默认 0.42 防爆闪；裁决 0.7） */
+  maxOpacity?: number;
+  /** 直线速度（风刃横扫等需要位移的模型，米/秒） */
+  vel?: { x: number; y: number; z: number };
 }
 
 export class SkillFx3D {
@@ -96,14 +100,13 @@ export class SkillFx3D {
     referenceHeight: number = SkillFx3D.REFERENCE_HEIGHT,
     follow?: () => { x: number; y: number; z: number } | null | false,
   ): void {
-    // P2+：用户反馈"每个角色的几何大型特效（套筒/光柱/锥/球壳/十字/光环）覆盖在
-    // 战斗画面上看起来突兀且容易和 2D 数字飘字互相干扰"——
-    // 因此这里**直接 no-op**：不再创建任何 3D 几何（套筒/光柱/球壳/十字/倒锥/光环）。
-    // 战斗视觉回到：仅 2D 粒子（VfxPool 的 spark/glow/ring sprite）+ 数字飘字 + 受击飘字。
-    // 调用方仍可继续传 skillId，未来想恢复单个特效只需去掉本行 return。
-    void skillId; void x; void y; void z; void color; void accent; void target;
-    void referenceHeight; void follow;
-    return;
+    // 只恢复 UR 光轮裁决：它是单目标、短生命周期的“天罚落点”，
+    // 其余技能继续保持轻量 2D 反馈，避免移动端同时堆叠多个几何壳。
+    if (skillId !== 'stellar_judgment') return;
+    const scale = Math.min(1.1, Math.max(0.72, referenceHeight / SkillFx3D.REFERENCE_HEIGHT)) * 1.44;
+    this.spawnJudgmentShell(x, y, z, color, accent, target, scale);
+    const active = this.active[this.active.length - 1];
+    if (active && follow) active.follow = follow;
   }
 
   /** 每帧驱动所有活动 shell 的生命周期。Combat3D 在 update() 调用一次即可 */
@@ -127,6 +130,13 @@ export class SkillFx3D {
         }
       }
 
+      // 直线位移（风刃横扫等）
+      if (a.vel) {
+        a.group.position.x += a.vel.x * dt;
+        a.group.position.y += a.vel.y * dt;
+        a.group.position.z += a.vel.z * dt;
+      }
+
       // 旋转
       if (a.spin !== 0) {
         a.group.rotation.y += a.spin * dt;
@@ -138,7 +148,7 @@ export class SkillFx3D {
       //   60%~100% 平滑淡出到 0
       // 整体封顶 MAX_OPACITY，且不开启 toneMapped（避免 sRGB 重建把 0.45 提升成白色）。
       // 真正修复"白色爆闪"靠这两点 + 全程不让任何材质 opacity 越过封顶。
-      const MAX_OPACITY = 0.42;
+      const MAX_OPACITY = a.maxOpacity ?? 0.42;
       let env: number;
       if (t < 0.25) {
         env = t / 0.25; // 0 → 1
@@ -543,6 +553,7 @@ export class SkillFx3D {
       spin: 0,
       popIn: 1,
       baseScale: scale,
+      maxOpacity: 0.7,
     });
   }
 
@@ -596,6 +607,173 @@ export class SkillFx3D {
       spin: 1.6,
       popIn: 1,
       baseScale: scale,
+    });
+  }
+
+  /** 巨型风刃横扫（ashcrow 破风突贯）：宽 7 米斜劈刃体，沿 -z 劈砍整道 */
+  spawnBladeSweep(x: number, y: number, z: number, color: string, accent: string, scale = 1): void {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    const bladeMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(8, 0.8, 0.3), bladeMat);
+    blade.rotation.z = 0.5;
+    blade.rotation.y = 0.15;
+    g.add(blade);
+    const edgeMat = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(8.2, 0.22, 0.34), edgeMat);
+    edge.rotation.z = 0.5;
+    edge.position.y = -0.7;
+    g.add(edge);
+    const cross = new THREE.Mesh(new THREE.BoxGeometry(5, 0.5, 0.28), bladeMat);
+    cross.rotation.z = -0.45;
+    g.add(cross);
+    this.scene.add(g);
+    this.active.push({
+      group: g, meshes: [blade, edge, cross], materials: [bladeMat, edgeMat],
+      life: 0, maxLife: 3.0, spin: 0, popIn: 1, baseScale: scale,
+      maxOpacity: 0.6, vel: { x: 0, y: 0, z: -34 },
+    });
+  }
+
+  /** 连斩牵引线（neoncoil/frostline）：施法者枪口直连目标的粗光束，目标绝不模糊 */
+  spawnSlashLine(x1: number, y1: number, z1: number, x2: number, y2: number, z2: number, color: string, width = 0.35, lifeSec = 0.3): void {
+    const from = new THREE.Vector3(x1, y1, z1);
+    const to = new THREE.Vector3(x2, y2, z2);
+    const len = Math.max(0.5, from.distanceTo(to));
+    const g = new THREE.Group();
+    g.position.copy(from);
+    g.lookAt(to);
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(width, width, len), mat);
+    beam.position.z = len / 2;
+    g.add(beam);
+    this.scene.add(g);
+    this.active.push({
+      group: g, meshes: [beam], materials: [mat],
+      life: 0, maxLife: lifeSec, spin: 0, popIn: 1, baseScale: 1, maxOpacity: 0.85,
+    });
+  }
+
+  /** 熔城炮弹（prismrift）：巨型火球按速飞行，0.6秒后正好砸中，飞行=蓄力 */
+  spawnCannonShell(x: number, y: number, z: number, color: string, accent: string, speed: number, scale = 1.4): void {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    const coreMat = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.9, 16, 12), coreMat);
+    g.add(core);
+    const glowMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
+    const glow = new THREE.Mesh(new THREE.SphereGeometry(1.7, 16, 12), glowMat);
+    g.add(glow);
+    this.scene.add(g);
+    this.active.push({
+      group: g, meshes: [core, glow], materials: [coreMat, glowMat],
+      life: 0, maxLife: 0.62, spin: 0, popIn: 1, baseScale: scale,
+      maxOpacity: 0.9, vel: { x: 0, y: 0, z: -speed },
+    });
+  }
+
+  /** 熔渣尖刺（ironrain 被动雨幕）：从高空砸向单个目标的梭形熔渣 */
+  spawnRainSpike(x: number, topY: number, z: number, color: string, accent: string, speed: number, life: number): void {
+    const g = new THREE.Group();
+    g.position.set(x, topY, z);
+    const spikeMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.55, 3.2, 6), spikeMat);
+    spike.rotation.x = Math.PI;
+    g.add(spike);
+    const glowMat = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
+    const glow = new THREE.Mesh(new THREE.SphereGeometry(1.1, 12, 10), glowMat);
+    g.add(glow);
+    this.scene.add(g);
+    this.active.push({
+      group: g, meshes: [spike, glow], materials: [spikeMat, glowMat],
+      life: 0, maxLife: life, spin: 0, popIn: 1, baseScale: 1,
+      maxOpacity: 0.85, vel: { x: 0, y: -speed, z: 0 },
+    });
+  }
+
+  /** 织网金穹（mirror 弹道织网）：玩家上空三层大金环穹顶，最大半径 4.4 米 */
+  spawnWeaveDome(x: number, y: number, z: number, color: string, accent: string, scale = 1): void {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    const mats: THREE.MeshBasicMaterial[] = [];
+    const meshes: THREE.Mesh[] = [];
+    const radii = [2.2, 3.3, 4.4];
+    radii.forEach((r, i) => {
+      const m = new THREE.MeshBasicMaterial({ color: i % 2 ? accent : color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(r, 0.09, 8, 64), m);
+      ring.rotation.x = Math.PI / 2 - 0.25 * i;
+      ring.position.y = 0.4 * i;
+      g.add(ring);
+      mats.push(m);
+      meshes.push(ring);
+    });
+    const orbMat = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false });
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 12), orbMat);
+    orb.position.y = 2.6;
+    g.add(orb);
+    mats.push(orbMat);
+    meshes.push(orb);
+    this.scene.add(g);
+    this.active.push({
+      group: g, meshes, materials: mats,
+      life: 0, maxLife: 1.4, spin: 1.2, popIn: 1, baseScale: scale, maxOpacity: 0.75,
+    });
+  }
+
+  /** 庇护穹顶（heartforge 楯影庇护）：跟随单角色的半球护罩 */
+  spawnAegisDome(
+    follow: () => { x: number; y: number; z: number } | null | false,
+    color: string,
+    accent: string,
+    scale = 1,
+    life = 6,
+  ): void {
+    const g = new THREE.Group();
+    const domeMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(1.7, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
+    dome.position.y = 0.1;
+    g.add(dome);
+    const ringMat = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.7, 0.07, 8, 48), ringMat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.1;
+    g.add(ring);
+    this.scene.add(g);
+    this.active.push({
+      group: g, meshes: [dome, ring], materials: [domeMat, ringMat],
+      life: 0, maxLife: life, spin: 0.6, popIn: 1, baseScale: scale,
+      maxOpacity: 0.5, follow,
+    });
+  }
+
+  /** 冰刺环（skyshard 极寒静域）：8 根冰锥围圈 + 地面冰环 */
+  spawnShardRing(x: number, groundY: number, z: number, color: string, accent: string, scale = 1): void {
+    const g = new THREE.Group();
+    g.position.set(x, groundY, z);
+    const mats: THREE.MeshBasicMaterial[] = [];
+    const meshes: THREE.Mesh[] = [];
+    const spikeMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+    for (let i = 0; i < 8; i++) {
+      const ang = (i / 8) * Math.PI * 2;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2.6, 6), spikeMat);
+      spike.position.set(Math.cos(ang) * 3.5, 1.3, Math.sin(ang) * 3.5);
+      spike.rotation.z = -Math.cos(ang) * 0.25;
+      spike.rotation.x = Math.sin(ang) * 0.25;
+      g.add(spike);
+      meshes.push(spike);
+    }
+    mats.push(spikeMat);
+    const ringMat = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(3.5, 0.08, 8, 64), ringMat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.05;
+    g.add(ring);
+    mats.push(ringMat);
+    meshes.push(ring);
+    this.scene.add(g);
+    this.active.push({
+      group: g, meshes, materials: mats,
+      life: 0, maxLife: 1.2, spin: 0.5, popIn: 1, baseScale: scale, maxOpacity: 0.7,
     });
   }
 }

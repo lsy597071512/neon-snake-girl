@@ -40,7 +40,9 @@ export function combatParamsForTier(tier: number, hell = false) {
     timer: Math.max(55, 88 - Math.floor(tier / 8) * 2),
     waves: Math.min(hell ? 9 : 8, 3 + Math.floor(tier / 12) + (hell ? 1 : 0)),
     // v2 曲线：以「推荐 TCP 弹伤 ≈ tcp/8×1.4」为基准，TTK 从 ~2 发抬到 3.5~5 发
-    enemyHp: Math.floor((38 + tier * 10 + Math.floor(tier * tier * 0.22)) * hellMul),
+    enemyHp: Math.floor(
+      (38 + tier * 10 + Math.floor(tier * tier * 0.22)) * hellMul * (1 + Math.min(0.5, tier * 0.008)),
+    ),
     enemyDamage: Math.floor((5 + Math.floor(tier / 4) * 2) * hellDmgMul),
   };
 }
@@ -63,7 +65,7 @@ export function waveEnemyCount(
 /** 雷电 BOSS 血量：推荐 TCP 下约 15–18 秒击杀 */
 export function raidBossHp(tier: number, hell = false): number {
   const tcp = recommendedTcpForTier(tier, { hell });
-  const mul = hell ? 6.8 : 4.4;
+  const mul = hell ? 8.0 : 5.2;
   return Math.max(800, Math.floor(tcp * mul));
 }
 

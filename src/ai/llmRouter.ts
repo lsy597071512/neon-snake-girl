@@ -1,4 +1,4 @@
-﻿/**
+/**
  * LLM 通道分流：
  * - dialogue：可切 DashScope 千问（默认）或 OpenAI 兼容（本机 Fable Q4 / Ollama）
  * - life / 摘要：仍走 DashScope（需玩家 Key）；失败由上层本地兜底
@@ -131,6 +131,8 @@ async function chatDialogueStreamJsonNow<T>(
       });
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      // 连不上就别再打第二条请求；否则同一次失败会在面板上刷两遍
+      if ((err as { network?: boolean } | null)?.network) throw err;
       const abortController = new AbortController();
       const timeoutMs = opts.timeoutMs ?? 120_000;
       const timeoutHandle = setTimeout(() => abortController.abort(), timeoutMs);
@@ -153,10 +155,21 @@ async function chatDialogueStreamJsonNow<T>(
     }
   }
 
-  // 千问：流式首包
-  return _tryDialogueStream<T>(messages, opts, false, {
-    timeoutMs: opts.timeoutMs ?? 30_000,
-  });
+  // 千问：流式首包。网关偶发空包时仅重试一次，不把空响应直接显示给玩家。
+  try {
+    return await _tryDialogueStream<T>(messages, opts, false, {
+      timeoutMs: opts.timeoutMs ?? 30_000,
+    });
+  } catch (err) {
+    // 网络/DNS 失败时重试无意义，只会让玩家多等一轮再看到同一条报错
+    if ((err as { network?: boolean } | null)?.network) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    if (!/空内容|empty content/i.test(message)) throw err;
+    if (opts.signal?.aborted) throw err;
+    return _tryDialogueStream<T>(messages, opts, false, {
+      timeoutMs: opts.timeoutMs ?? 30_000,
+    });
+  }
 }
 
 /**
@@ -211,8 +224,38 @@ async function _tryDialogueStream<T>(
       // 超时或主动取消 → 抛出让上层处理
       throw err;
     }
-    // 流式失败 → 回落非流式
-    return chatJsonQwenNow<T>(messages, { ...opts, model, channel: 'dialogue' });
+    // 网络/DNS 失败：回落非流式只会再失败一次，直接把首条错误交给上层
+    if ((err as { network?: boolean } | null)?.network) throw err;
+    // 流式失败 → 回落非流式。
+    // 非流式请求同样可能无限挂起（移动网络黑洞）：加 60 秒硬超时，
+    // 并跟随租约信号（玩家发新消息时立即让位），避免交互队列被堵死。
+    const fallbackAbort = new AbortController();
+    const onLeaseAbort = () => fallbackAbort.abort();
+    let leaseListenerAttached = false;
+    if (opts.signal) {
+      if (opts.signal.aborted) fallbackAbort.abort();
+      else {
+        opts.signal.addEventListener('abort', onLeaseAbort, { once: true });
+        leaseListenerAttached = true;
+      }
+    }
+    const fallbackTimer = setTimeout(
+      () => fallbackAbort.abort(new Error('千问非流式响应超时（60 秒），已放弃本轮')),
+      60_000,
+    );
+    try {
+      return await chatJsonQwenNow<T>(messages, {
+        ...opts,
+        model,
+        channel: 'dialogue',
+        signal: fallbackAbort.signal,
+      });
+    } finally {
+      clearTimeout(fallbackTimer);
+      if (leaseListenerAttached && opts.signal) {
+        opts.signal.removeEventListener('abort', onLeaseAbort);
+      }
+    }
   } finally {
     clearTimeout(timeoutHandle);
   }

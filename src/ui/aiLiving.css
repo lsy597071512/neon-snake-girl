@@ -47,13 +47,15 @@
 }
 
 .wl-hub .hub-clock-chip {
-  left: clamp(8px, 2vw, 12px);
-  bottom: calc(var(--wl-ui-bottom) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--wl-ui-bottom) + 6px);
   z-index: 11;
-  max-width: min(72%, 280px);
+  max-width: min(60%, 260px);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: center;
 }
 
 .camp-living-overlay {
@@ -118,6 +120,31 @@
   color: #f3e2c4;
   font-size: 22px;
   line-height: 1;
+}
+
+/* 表达模式开关（语音/文字）：位于右上角关闭按钮左侧 */
+.ai-immersive-voice-mode {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: 56px;
+  z-index: 5;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 220, 180, 0.35);
+  background: rgba(12, 10, 8, 0.55);
+  color: #f3e2c4;
+  font-size: 17px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.ai-immersive-voice-mode.is-text-mode {
+  border-color: rgba(120, 200, 255, 0.45);
+  color: #bfe6ff;
 }
 
 .ai-immersive-chip {
@@ -242,6 +269,9 @@
   justify-content: center;
   align-items: flex-end;
   isolation: isolate;
+  /* 双指缩放 / 长按选段需要真实命中立绘区域 */
+  pointer-events: auto;
+  touch-action: none;
 }
 
 .ai-dlg-layer {
@@ -397,11 +427,67 @@
   right: 0;
   bottom: 0;
   z-index: 6;
-  padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
+  /* 左侧给竖排互动按钮让位：按钮永不与聊天文字重叠 */
+  padding: 8px 12px calc(10px + env(safe-area-inset-bottom)) 66px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   background: linear-gradient(180deg, transparent 0%, rgba(6, 6, 8, 0.75) 28%, rgba(6, 6, 8, 0.92) 100%);
+}
+
+/* ===== 左下竖排互动按钮（聊天页事件入口） ===== */
+.ai-immersive-rail {
+  position: absolute;
+  left: 10px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.ai-immersive-rail .ai-immersive-dance,
+.ai-immersive-rail .ai-immersive-bath,
+.ai-immersive-rail .ai-immersive-minigame,
+.ai-immersive-rail .ai-immersive-anfu,
+.ai-immersive-rail .ai-immersive-items {
+  width: 44px;
+  height: 44px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 19px;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.ai-immersive-rail .ai-immersive-dance:active,
+.ai-immersive-rail .ai-immersive-bath:active,
+.ai-immersive-rail .ai-immersive-minigame:active,
+.ai-immersive-rail .ai-immersive-anfu:active,
+.ai-immersive-rail .ai-immersive-items:active {
+  transform: scale(0.9);
+}
+
+/* 矮屏（横屏手机）：按钮收小，避免顶出屏幕 */
+@media (max-height: 500px) {
+  .ai-immersive-dock {
+    padding-left: 58px;
+  }
+  .ai-immersive-rail {
+    gap: 6px;
+  }
+  .ai-immersive-rail .ai-immersive-dance,
+  .ai-immersive-rail .ai-immersive-bath,
+  .ai-immersive-rail .ai-immersive-minigame,
+  .ai-immersive-rail .ai-immersive-anfu,
+  .ai-immersive-rail .ai-immersive-items {
+    width: 38px;
+    height: 38px;
+    font-size: 16px;
+  }
 }
 
 .ai-immersive-log {
@@ -824,7 +910,43 @@
   justify-content: stretch;
 }
 
+/* 老板娘页招募入口：随左栏宽度贴合，文字不挤 */
+.camp-shop-keeper-col .recruit-entry {
+  width: 100%;
+  max-width: 360px;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  padding: 8px 10px;
+  gap: 8px;
+}
+
+.camp-shop-keeper-col .recruit-entry-sigil {
+  width: 30px;
+  height: 30px;
+  filter: drop-shadow(0 0 8px rgba(255, 190, 110, 0.5));
+}
+
+.camp-shop-keeper-col .recruit-entry-body strong {
+  font-size: 12px;
+}
+
+.camp-shop-keeper-col .recruit-entry-body small {
+  font-size: 9.5px;
+}
+
+.camp-shop-keeper-col .recruit-entry-go {
+  font-size: 11px;
+}
+
+.camp-shop-keeper-col .camp-shop-keeper-figure {
+  min-height: 0;
+}
+
 @media (max-width: 720px) {
+  .camp-shop-keeper-col .recruit-entry {
+    max-width: none;
+  }
+
   .camp-shop-split {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(180px, 32vh) minmax(0, 1fr);
@@ -1049,6 +1171,15 @@
 
 .cl-mood b {
   color: #e2b56a;
+}
+
+/* 心情连续体标记：低落暖红 / 高兴翠绿 / 平稳金色 */
+.cl-mood.is-low b {
+  color: #ff8d7a;
+}
+
+.cl-mood.is-high b {
+  color: #7fe0a0;
 }
 
 .cl-char-row3 {
@@ -1628,6 +1759,97 @@
   padding-top: 152px;
 }
 
+/* ── 营地顶部栏：统一网格，杜绝元素重叠 ──────────────────────────
+   旧实现把「返回主城 / 时钟 / 仓库商店武器库 / 楼层页签」四者各自 absolute
+   定位挤在同一垂直带，窄屏上时钟（居中、最宽 64%）必然压住左右两组按钮。
+   现改为单层 CSS Grid：第 1 行 三列自适应，第 2 行 楼层页签整行。
+   顶部栏高度收敛为 --camp-topbar-h 供下方横幅/子页 padding 对齐。 */
+.camp-topbar {
+  --camp-topbar-safe: max(10px, env(safe-area-inset-top, 0px));
+  --camp-topbar-h: calc(var(--camp-topbar-safe) + 40px + 8px + 42px + 10px);
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 44;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'back clock sys'
+    'tabs tabs tabs'
+    'banner banner banner';
+  align-items: center;
+  gap: 8px;
+  padding: var(--camp-topbar-safe) 10px 10px;
+  /* 容器本身不吃点击，避免挡住下方地图拖拽 */
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(10, 8, 6, 0.92) 0%, rgba(10, 8, 6, 0.55) 62%, transparent 100%);
+}
+
+.camp-topbar > * {
+  pointer-events: auto;
+  min-width: 0;
+}
+
+/* 第 1 行三件套：回到 static，由网格统一分配空间 */
+.camp-topbar .camp-hub-back,
+.camp-topbar .hub-clock-chip,
+.camp-topbar .camp-hub-sys-bar {
+  position: static;
+  transform: none;
+  inset: auto;
+  max-width: none;
+  margin: 0;
+}
+
+.camp-topbar .camp-hub-back {
+  grid-area: back;
+  justify-self: start;
+}
+
+.camp-topbar .hub-clock-chip,
+.camp-topbar .camp-topbar-filler {
+  grid-area: clock;
+  justify-self: center;
+  max-width: 100%;
+}
+
+.camp-topbar .camp-hub-sys-bar {
+  grid-area: sys;
+  justify-self: end;
+}
+
+.camp-topbar .camp-floor-tabs {
+  grid-area: tabs;
+}
+
+/* 事件横幅收进顶部栏第三行： grid 自动撑高，彻底杜绝与楼层页签/系统栏纵向重叠
+   （原绝对定位靠 --camp-topbar-h 常量估算高度，行内容超高时仍会被压住） */
+.camp-hub .camp-topbar .camp-event-banner {
+  grid-area: banner;
+  position: static;
+  inset: auto;
+  max-height: none;
+  margin: 0;
+  pointer-events: none;
+}
+
+/* 窄屏：三列会挤到极限，缩字号与内边距而非溢出重叠 */
+@media (max-width: 400px) {
+  .camp-hub-sys-btn {
+    font-size: 10px;
+    padding: 6px 8px;
+  }
+  .camp-topbar {
+    gap: 6px;
+  }
+}
+
+/* 事件横幅紧贴顶部栏下方（改用 --camp-topbar-h，不再靠魔法数字） */
+.camp-hub .camp-event-banner {
+  top: calc(var(--camp-topbar-h, 100px) + 8px);
+}
+
 .camp-hub-back {
   position: absolute;
   left: 10px;
@@ -1700,25 +1922,7 @@
   pointer-events: none;
 }
 
-.camp-hub .hub-clock-chip {
-  /* v3.4：移到顶部正中，和「返回主城」「系统栏」同一行，互相不重叠 */
-  top: max(8px, env(safe-area-inset-top, 0px));
-  left: 50%;
-  right: auto;
-  bottom: auto;
-  transform: translateX(-50%);
-  z-index: 40;
-  max-width: min(64%, 360px);
-  text-align: center;
-}
-
-/* v3.3 BUG7 修复：sys-bar 之前 top:safe-top，与 hub-clock 同高 → 在小
-   屏上重叠。改到 top:8px 偏右下，与 hub-clock 在同一水平行，宽度
-   由 max-width 控制避免与 clock chip 撞上。 */
-.camp-hub .camp-hub-sys-bar {
-  top: max(8px, env(safe-area-inset-top, 0px));
-}
-
+/* 时钟/系统栏的绝对定位已统一收进 .camp-topbar 网格（见文件上方 camp-topbar 段），旧覆盖块已移除。 */
 .camp-event-banner {
   position: absolute;
   left: 12px;
@@ -1876,18 +2080,12 @@
   overflow: hidden;
 }
 
+/* 楼层页签已移入 .camp-topbar 网格第 2 行（grid-area: tabs），
+   不再自行绝对定位/占位，位置由顶部栏统一管理。 */
 .camp-floor-tabs {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
   display: flex;
   gap: 8px;
-  padding: calc(max(10px, env(safe-area-inset-top, 0px)) + 52px) 12px 8px;
-  flex-shrink: 0;
-  z-index: 5;
   pointer-events: auto;
-  background: linear-gradient(180deg, rgba(10, 8, 6, 0.88), rgba(10, 8, 6, 0.35) 70%, transparent);
 }
 
 .camp-floor-tab {
@@ -2247,7 +2445,7 @@
   cursor: not-allowed;
 }
 
-/* 对话页 · 小黑屋 */
+/* 对话页 · 事件入口（已下线保留占位样式） */
 .ai-immersive-discipline {
   flex-shrink: 0;
   min-width: 52px;
@@ -2295,6 +2493,41 @@
 
 .ai-discipline-blackout.is-on.is-out {
   opacity: 0;
+}
+
+.ai-discipline-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(20, 10, 28, 0.78);
+  border: 1px solid rgba(255, 150, 120, 0.35);
+  color: #f4d8cf;
+  font-size: 12px;
+}
+
+.ai-discipline-value-label,
+.ai-discipline-value-band {
+  white-space: nowrap;
+}
+
+.ai-discipline-value-track {
+  flex: 1;
+  min-width: 64px;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.ai-discipline-value-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8e71cc, #e89d88);
+  transition: width 0.25s ease;
 }
 
 .ai-discipline-poses {
@@ -2390,6 +2623,98 @@
   background: rgba(40, 40, 48, 0.9);
   border-color: rgba(160, 160, 180, 0.35);
   color: #ddd;
+}
+
+/* —— 浴室帮洗 / 共浴 —— */
+.ai-bath-assist-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  background: rgba(12, 36, 48, 0.82);
+  border: 1px solid rgba(80, 200, 220, 0.35);
+}
+
+.ai-bath-assist-label {
+  font-size: 11px;
+  color: #8ec8d8;
+  margin-right: 2px;
+}
+
+.ai-bath-assist-btn {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(100, 210, 230, 0.45);
+  background: rgba(20, 48, 62, 0.95);
+  color: #d0f0f8;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-bath-assist-btn.is-on {
+  background: rgba(40, 120, 140, 0.95);
+  border-color: rgba(140, 230, 250, 0.7);
+  color: #fff;
+}
+
+.ai-bath-assist-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ai-bath-assist-end {
+  border-color: rgba(220, 140, 120, 0.5);
+  color: #f0d0c8;
+}
+
+.ai-bath-assist-hint {
+  font-size: 11px;
+  color: #8ec8d8;
+  margin-left: 4px;
+}
+
+.ai-bath-assist-invite {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(12, 36, 48, 0.88);
+  border: 1px solid rgba(80, 200, 220, 0.4);
+}
+
+.ai-bath-assist-invite-text {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #d0eef4;
+  line-height: 1.45;
+}
+
+.ai-bath-assist-invite-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ai-bath-assist-invite-yes,
+.ai-bath-assist-invite-no {
+  flex: 1;
+  height: 34px;
+  border-radius: 8px;
+  border: none;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ai-bath-assist-invite-yes {
+  background: rgba(40, 140, 160, 0.95);
+  color: #fff;
+}
+
+.ai-bath-assist-invite-no {
+  background: rgba(40, 36, 48, 0.9);
+  color: #c8b8d0;
 }
 
 .ai-immersive-dock.has-item-picker .ai-item-picker {
@@ -2569,9 +2894,27 @@
   color: #d8e8ff;
 }
 
-/* 营地对话：当前皮肤 _1/_2 互动层 */
+/* 安抚室专用片段层：独占一层，不受 has-secondary / 长按选段器影响 */
+.ai-dlg-portrait-stage .ai-dlg-anfu-clip {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  z-index: 2;
+}
+.ai-dlg-portrait-stage .ai-dlg-anfu-clip[hidden],
+.ai-dlg-portrait-stage .ai-dlg-anfu-clip.is-hidden {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  z-index: 0 !important;
+}
+
+/* 营地对话：当前皮肤 _1/_2 互动层（touch-action 已在舞台基础规则统一设置） */
 .ai-dlg-portrait-stage.has-secondary {
-  touch-action: none;
   user-select: none;
 }
 .ai-dlg-portrait-stage .ai-dlg-skin-secondary {
@@ -2599,9 +2942,635 @@
   opacity: 0;
   pointer-events: none;
 }
+/* 冲澡/换皮软切：淡入淡出，避免黑屏整层重建 */
+.ai-dlg-portrait-stage .ai-dlg-layer-skin video.is-exiting,
+.ai-dlg-portrait-stage .ai-dlg-layer-skin img.is-exiting {
+  opacity: 0;
+  transition: opacity 0.28s ease;
+}
+.ai-dlg-portrait-stage .ai-dlg-layer-skin video.is-entering,
+.ai-dlg-portrait-stage .ai-dlg-layer-skin img.is-entering {
+  opacity: 1;
+  transition: opacity 0.4s ease;
+}
 .ai-dlg-portrait-stage .ai-dlg-live-picker {
   z-index: 5;
 }
 .ai-dlg-portrait-stage.is-picking .ai-dlg-layer-skin > video[data-ai-live-portrait] {
   filter: brightness(0.85);
+}
+
+
+/* ===== 舞蹈事件 UI ===== */
+.ai-immersive-dance {
+  flex: 0 0 auto;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(220, 170, 255, 0.5);
+  background: rgba(40, 24, 54, 0.72);
+  color: #f0dcff;
+  font-size: 16px;
+  line-height: 1;
+}
+.ai-immersive-dance.is-active {
+  border-color: rgba(255, 200, 120, 0.85);
+  box-shadow: 0 0 10px rgba(255, 200, 120, 0.4);
+}
+.ai-immersive-dance[hidden] { display: none; }
+.ai-dance-menu {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  width: 100%;
+  margin-top: 8px;
+}
+.ai-dance-menu[hidden] { display: none; }
+.ai-dance-choice {
+  flex: 1 1 0;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(220, 170, 255, 0.5);
+  background: rgba(30, 18, 42, 0.82);
+  color: #f3e2ff;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+}
+.ai-dance-choice:active { transform: translateY(1px); }
+.ai-dance-invite {
+  width: 100%;
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(220, 170, 255, 0.5);
+  background: rgba(28, 18, 40, 0.86);
+  backdrop-filter: blur(6px);
+}
+.ai-dance-invite[hidden] { display: none; }
+.ai-dance-invite-text {
+  margin: 0 0 8px;
+  color: #f4e8ff;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.ai-dance-invite-actions { display: flex; gap: 8px; }
+.ai-dance-invite-yes,
+.ai-dance-invite-no {
+  flex: 1 1 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.ai-dance-invite-yes {
+  border: 1px solid rgba(255, 210, 140, 0.7);
+  background: rgba(90, 60, 20, 0.85);
+  color: #ffe8c2;
+}
+.ai-dance-invite-no {
+  border: 1px solid rgba(200, 180, 220, 0.4);
+  background: rgba(40, 32, 52, 0.8);
+  color: #ddcfe8;
+}
+
+/* ===== 洗浴事件 UI（与舞蹈同风格：紫底 + 水汽蓝高亮） ===== */
+.ai-immersive-bath {
+  flex: 0 0 auto;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(150, 210, 255, 0.5);
+  background: rgba(24, 40, 62, 0.72);
+  color: #d8f0ff;
+  font-size: 16px;
+  line-height: 1;
+}
+.ai-immersive-bath.is-active {
+  border-color: rgba(150, 220, 255, 0.85);
+  box-shadow: 0 0 10px rgba(120, 200, 255, 0.4);
+}
+.ai-immersive-bath[hidden] { display: none; }
+.ai-bath-menu {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  width: 100%;
+  margin-top: 8px;
+}
+.ai-bath-menu[hidden] { display: none; }
+.ai-bath-choice {
+  flex: 1 1 0;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(150, 210, 255, 0.5);
+  background: rgba(20, 32, 50, 0.85);
+  color: #ddf0ff;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+}
+.ai-bath-choice:active { transform: translateY(1px); }
+.ai-bath-choice:disabled {
+  opacity: 0.45;
+  border-color: rgba(150, 210, 255, 0.25);
+}
+.ai-bath-invite {
+  width: 100%;
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(150, 210, 255, 0.5);
+  background: rgba(20, 30, 48, 0.88);
+  backdrop-filter: blur(6px);
+}
+.ai-bath-invite[hidden] { display: none; }
+.ai-bath-invite-text {
+  margin: 0 0 8px;
+  color: #e4f2ff;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.ai-bath-invite-actions { display: flex; gap: 8px; }
+.ai-bath-invite-yes,
+.ai-bath-invite-no {
+  flex: 1 1 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.ai-bath-invite-yes {
+  border: 1px solid rgba(150, 220, 255, 0.75);
+  background: rgba(24, 70, 100, 0.88);
+  color: #dcf2ff;
+}
+.ai-bath-invite-no {
+  border: 1px solid rgba(200, 180, 220, 0.4);
+  background: rgba(40, 32, 52, 0.8);
+  color: #ddcfe8;
+}
+
+/* ===== 安抚室事件 UI（与舞蹈同风格：紫底 + 暖金高亮） ===== */
+.ai-immersive-anfu {
+  flex: 0 0 auto;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(220, 170, 255, 0.5);
+  background: rgba(40, 24, 54, 0.72);
+  color: #f0dcff;
+  font-size: 16px;
+  line-height: 1;
+}
+.ai-immersive-anfu.is-active {
+  border-color: rgba(255, 200, 120, 0.85);
+  box-shadow: 0 0 10px rgba(255, 200, 120, 0.4);
+}
+.ai-immersive-anfu[hidden] { display: none; }
+.ai-anfu-invite {
+  width: 100%;
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(220, 170, 255, 0.5);
+  background: rgba(28, 18, 40, 0.86);
+  backdrop-filter: blur(6px);
+}
+.ai-anfu-invite[hidden] { display: none; }
+.ai-anfu-invite-text {
+  margin: 0 0 8px;
+  color: #f4e8ff;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.ai-anfu-invite-actions { display: flex; gap: 8px; }
+.ai-anfu-invite-yes,
+.ai-anfu-invite-no {
+  flex: 1 1 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.ai-anfu-invite-yes {
+  border: 1px solid rgba(255, 210, 140, 0.7);
+  background: rgba(90, 60, 20, 0.85);
+  color: #ffe8c2;
+}
+.ai-anfu-invite-no {
+  border: 1px solid rgba(200, 180, 220, 0.4);
+  background: rgba(40, 32, 52, 0.8);
+  color: #ddcfe8;
+}
+.ai-anfu-bar {
+  width: 100%;
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 200, 120, 0.45);
+  background: rgba(34, 22, 40, 0.88);
+  backdrop-filter: blur(6px);
+}
+.ai-anfu-bar[hidden] { display: none; }
+.ai-anfu-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ai-anfu-meter-label {
+  flex: 0 0 auto;
+  color: #ffe8c2;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.ai-anfu-meter-track {
+  flex: 1 1 auto;
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(20, 12, 26, 0.9);
+  border: 1px solid rgba(220, 170, 255, 0.35);
+  overflow: hidden;
+}
+.ai-anfu-meter-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(220, 170, 255, 0.9), rgba(255, 200, 120, 0.95));
+  transition: width 0.4s ease;
+}
+.ai-anfu-meter-value {
+  flex: 0 0 auto;
+  color: #f4e8ff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ai-anfu-actions { display: flex; gap: 8px; }
+.ai-anfu-attack {
+  flex: 2 1 0;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 210, 140, 0.7);
+  background: rgba(90, 60, 20, 0.85);
+  color: #ffe8c2;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+}
+.ai-anfu-attack:active { transform: translateY(1px); }
+.ai-anfu-attack:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ai-anfu-leave {
+  flex: 1 1 0;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(200, 180, 220, 0.4);
+  background: rgba(40, 32, 52, 0.8);
+  color: #ddcfe8;
+  font-size: 13px;
+}
+.ai-anfu-leave:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ===== 小游戏事件 UI（五子棋/猜拳：按钮 + 菜单 + 邀请条 + 浮层面板） ===== */
+.ai-immersive-minigame {
+  flex: 0 0 auto;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(160, 220, 160, 0.5);
+  background: rgba(22, 42, 30, 0.72);
+  color: #dcf5e2;
+  font-size: 16px;
+  line-height: 1;
+}
+.ai-immersive-minigame.is-active {
+  border-color: rgba(150, 235, 170, 0.85);
+  box-shadow: 0 0 10px rgba(120, 220, 150, 0.4);
+}
+.ai-immersive-minigame[hidden] { display: none; }
+.ai-minigame-menu {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  width: 100%;
+  margin-top: 8px;
+}
+.ai-minigame-menu[hidden] { display: none; }
+.ai-minigame-choice {
+  flex: 1 1 0;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(160, 220, 160, 0.5);
+  background: rgba(20, 36, 26, 0.85);
+  color: #e2f5e8;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+}
+.ai-minigame-choice:active { transform: translateY(1px); }
+.ai-minigame-invite {
+  width: 100%;
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(160, 220, 160, 0.5);
+  background: rgba(18, 34, 24, 0.88);
+  backdrop-filter: blur(6px);
+}
+.ai-minigame-invite[hidden] { display: none; }
+.ai-minigame-invite-text {
+  margin: 0 0 8px;
+  color: #e6f6ec;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.ai-minigame-invite-actions { display: flex; gap: 8px; }
+.ai-minigame-invite-yes,
+.ai-minigame-invite-no {
+  flex: 1 1 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.ai-minigame-invite-yes {
+  border: 1px solid rgba(150, 235, 170, 0.75);
+  background: rgba(30, 80, 46, 0.88);
+  color: #dcffe8;
+}
+.ai-minigame-invite-no {
+  border: 1px solid rgba(200, 180, 220, 0.4);
+  background: rgba(40, 32, 52, 0.8);
+  color: #ddcfe8;
+}
+
+/* 对局浮层面板：挂 stage 内绝对定位，不遮输入区（左侧安全位 left:12px top:15%） */
+.ai-minigame-panel {
+  position: absolute;
+  left: 12px;
+  top: 15%;
+  z-index: 6;
+  width: min(320px, 44vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(160, 220, 160, 0.4);
+  background: rgba(14, 24, 18, 0.78);
+  backdrop-filter: blur(8px);
+}
+.ai-minigame-panel[hidden] { display: none; }
+.ai-minigame-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+.ai-minigame-close img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.ai-minigame-title {
+  width: 62%;
+  max-width: 200px;
+  display: block;
+}
+.ai-minigame-title-text {
+  margin: 2px 0 0;
+  color: #eafff0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.ai-minigame-status {
+  position: relative;
+  width: 60%;
+  max-width: 190px;
+}
+.ai-minigame-status img { width: 100%; display: block; }
+.ai-minigame-status span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #10241a;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.ai-minigame-timer {
+  position: relative;
+  width: 86%;
+  height: 20px;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
+.ai-minigame-timer[hidden] { display: none; }
+.ai-minigame-timer-bar {
+  position: absolute;
+  left: 6%;
+  top: 30%;
+  height: 40%;
+  width: 88%;
+  max-width: 88%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(140, 230, 165, 0.95), rgba(220, 240, 150, 0.95));
+  transition: width 0.2s linear;
+}
+.ai-minigame-timer-bar.is-low {
+  background: linear-gradient(90deg, rgba(255, 120, 110, 0.95), rgba(255, 180, 120, 0.95));
+}
+.ai-minigame-timer-num {
+  position: absolute;
+  right: 8%;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #10241a;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ai-minigame-board {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 812 / 868;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  touch-action: manipulation;
+}
+.ai-minigame-board.is-your-turn { cursor: pointer; }
+.ai-minigame-stone {
+  position: absolute;
+  width: 6.2%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.ai-minigame-lastmark {
+  position: absolute;
+  width: 8.4%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.ai-minigame-rps {
+  width: 100%;
+  padding: 14px 12px;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  border-radius: 12px;
+  text-align: center;
+}
+.ai-minigame-rps-score {
+  margin: 0 0 6px;
+  color: #ffe9c0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.ai-minigame-rps-last {
+  margin: 0 0 10px;
+  color: #d8ecd8;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.ai-minigame-rps-btns {
+  display: flex;
+  gap: 8px;
+}
+.ai-minigame-rps-btns button {
+  flex: 1 1 0;
+  padding: 9px 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(160, 220, 160, 0.55);
+  background: rgba(20, 38, 26, 0.88);
+  color: #e2f5e8;
+  font-size: 13px;
+}
+.ai-minigame-rps-btns button:disabled { opacity: 0.45; }
+.ai-minigame-rps-btns button:not(:disabled):active { transform: translateY(1px); }
+.ai-minigame-pillbtn {
+  position: relative;
+  width: 56%;
+  max-width: 170px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  aspect-ratio: 4 / 1;
+  color: #10241a;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+.ai-minigame-pillbtn:active { transform: translateY(1px); }
+.ai-minigame-quitwarn {
+  margin: 0;
+  color: #ffd9a8;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+}
+.ai-minigame-quitrow {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  justify-content: center;
+}
+.ai-minigame-quitrow .ai-minigame-pillbtn { width: 44%; }
+.ai-minigame-stake {
+  margin: 0;
+  color: #cfe9ff;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+@media (max-width: 768px) {
+  .ai-minigame-panel {
+    width: min(280px, 72vw);
+    top: 12%;
+  }
+}
+
+/* ===== 聊天页首次打开引导（一次性） ===== */
+.ai-dlg-guide {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(6, 5, 8, 0.62);
+  backdrop-filter: blur(3px);
+  animation: ai-dlg-guide-in 0.35s ease both;
+}
+.ai-dlg-guide.is-leaving {
+  animation: ai-dlg-guide-out 0.32s ease both;
+  pointer-events: none;
+}
+@keyframes ai-dlg-guide-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes ai-dlg-guide-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+.ai-dlg-guide-card {
+  width: min(92vw, 420px);
+  padding: 18px 20px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 214, 160, 0.35);
+  background: rgba(24, 18, 14, 0.94);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+.ai-dlg-guide-title {
+  margin: 0 0 12px;
+  font-size: 17px;
+  color: #ffe6c2;
+  letter-spacing: 0.05em;
+}
+.ai-dlg-guide-list {
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ai-dlg-guide-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #efe2cf;
+}
+.ai-dlg-guide-ico {
+  flex: 0 0 auto;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.ai-dlg-guide-ok {
+  width: 100%;
+  padding: 11px 0;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 200, 120, 0.5);
+  background: rgba(96, 60, 22, 0.92);
+  color: #ffe8c8;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.ai-dlg-guide-ok:active { transform: translateY(1px); }
+@media (prefers-reduced-motion: reduce) {
+  .ai-dlg-guide { animation: none; }
 }

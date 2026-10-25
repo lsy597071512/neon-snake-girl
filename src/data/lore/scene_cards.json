@@ -974,16 +974,16 @@
   },
   "indoor_tiaojiaoshi": {
     "id": "indoor_tiaojiaoshi",
-    "label": "负一楼·小黑屋",
+    "label": "负一楼·安抚室",
     "kind": "indoor",
     "image": "./tex/Indoor/shinei01_tiaojiaoshi.png",
     "period": "any",
     "weather": "indoor",
-    "locationName": "家园营地·负一楼机器人调教室（小黑屋）",
-    "atmosphere": "昏暗调教室：拘束装置与指挥官侧黑色机械触手工具隐约可见，空气压抑。",
-    "sensory": ["金属冷感", "低沉机械嗡鸣", "昏暗灯光", "拘束带触感"],
-    "dialogueHints": ["被动约束", "惩罚余波", "害怕或嘴硬", "禁止假装还在大厅"],
-    "interactables": ["拘束架", "机械触手装置", "调教台"]
+    "locationName": "家园营地·负一楼安抚室",
+    "atmosphere": "安静的地下安抚室：软垫、暖光与备用棉花，昏黄灯光下很放松，少有人来。",
+    "sensory": ["软垫触感", "低沉机械嗡鸣", "昏黄灯光", "棉花香"],
+    "dialogueHints": ["安静少人", "软垫棉花", "适合独处", "禁止假装还在大厅"],
+    "interactables": ["软垫", "棉花筐", "暖光灯"]
   }
 
 }

@@ -1,6 +1,7 @@
 import type { AiLivingSave } from './types';
 import { detectArcTransition, resolveRelationshipArc } from './relationshipArc';
 import { recordArcTransitionFact } from './structuredFacts';
+import { getMoodSnapshot } from './moodContinuum';
 
 export function relationKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
@@ -23,9 +24,30 @@ export function getAffinity(living: AiLivingSave, characterId: string): number {
   return living.affinities[characterId] ?? 40;
 }
 
+/**
+ * 心情对好感变化的调制（活人定律）：
+ * - 心情差时玩家做坏事 → 扣分放大（×1.5，火上浇油）
+ * - 心情好时玩家做坏事 → 扣分缓冲（×0.5，爱意滤镜）
+ * - 心情差时玩家做好事 → 加成分放大（×1.25，雪中送炭）
+ * 心情与好感弱绑定：好感 100 也可能心情差，此时更经不起坏事。
+ */
+function modulateAffinityDeltaByMood(living: AiLivingSave, characterId: string, delta: number): number {
+  if (delta === 0) return 0;
+  const { valence } = getMoodSnapshot(living, characterId);
+  let mult = 1;
+  if (delta < 0 && valence <= -35) mult = 1.5;
+  else if (delta < 0 && valence >= 40) mult = 0.5;
+  else if (delta > 0 && valence <= -35) mult = 1.25;
+  const scaled = Math.round(delta * mult);
+  // 保底至少 1 点，避免调制后归零失去反馈
+  if (scaled === 0) return delta > 0 ? 1 : -1;
+  return scaled;
+}
+
 export function adjustAffinity(living: AiLivingSave, characterId: string, delta: number): number {
+  const modDelta = modulateAffinityDeltaByMood(living, characterId, delta);
   const prev = getAffinity(living, characterId);
-  const next = Math.max(0, Math.min(100, prev + delta));
+  const next = Math.max(0, Math.min(100, prev + modDelta));
   living.affinities[characterId] = next;
 
   if (!living.relationshipArcStage) living.relationshipArcStage = {};

@@ -51,6 +51,8 @@ type PosterOrient = 'portrait' | 'landscape';
 
 export type CharacterDetailOptions = {
   onChanged?: () => void;
+  /** 新手引导一句话说明（首次打开时展示一次） */
+  guideHint?: string;
 };
 
 function openCharacterPosterViewer(characterId: string, characterName: string): void {
@@ -371,6 +373,11 @@ export function showCharacterDetail(
       <div class="modal-corner tl"></div><div class="modal-corner tr"></div>
       <div class="modal-corner bl"></div><div class="modal-corner br"></div>
       <div class="char-detail-toolbar">
+        ${
+          opts?.guideHint
+            ? `<p class="char-detail-guide-hint">${escapeHtml(opts.guideHint)} <span>（仅提示一次）</span></p>`
+            : ''
+        }
         ${
           posters
             ? `<button class="btn btn-secondary char-detail-poster-btn" type="button" data-char-poster>角色海报</button>`

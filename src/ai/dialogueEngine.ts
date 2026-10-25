@@ -25,6 +25,55 @@ import type { SaveData } from '../types';
 import { saveManager } from '../core/SaveManager';
 import { getCoScreenGroupForCharacter } from './campEvents';
 import { applyBathIntimateConsentFromAi } from './bathIntimateConsent';
+import {
+  detectAiBathAssistEnd,
+  isBathAssistActiveFor,
+  leaveBathAssistSession,
+  maybeProposeBathAssistInvite,
+  parseBathAssistActionField,
+  resolvePlayerBathAssistAskFromTurn,
+} from './bathAssistSession';
+import {
+  beginCoDance,
+  beginSoloDance,
+  consumeDanceJustEntered,
+  detectAiContinuesDance,
+  detectAiStopsDance,
+  getDanceSession,
+  isDanceActiveFor,
+  leaveDanceSession,
+  maybeProposeDanceInvite,
+  offerDanceInviteFromTurn,
+  parseDanceActionField,
+  resolvePlayerDanceAskFromTurn,
+  returnToPrepare,
+  setSoloPaused,
+} from './danceSession';
+import {
+  consumeAnfuJustEntered,
+  detectAiAnfuPropose,
+  isAnfuActiveFor,
+  leaveAnfuSession,
+  maybeProposeAnfuInvite,
+  offerAnfuInviteFromTurn,
+  parseAnfuActionField,
+  parseAnfuBonusField,
+  parseAnfuGainField,
+  resolveAnfuAttackGain,
+  resolvePlayerAnfuAskFromTurn,
+  settleAnfuExhausted,
+} from './anfuSession';
+import {
+  aiQuitMiniGame,
+  consumeMiniGameJustEntered,
+  detectAiMiniGamePropose,
+  isMiniGameActiveFor,
+  maybeProposeMiniGameInvite,
+  offerMiniGameInviteFromTurn,
+  parseMiniGameActionField,
+  resolveMiniGameStake,
+  resolvePlayerMiniGameAskFromTurn,
+} from './miniGameSession';
 import { applyAdultEventFromLlm, detectAdultEventContext } from './adultEvents';
 import { applyDesireNextFromDialogue, commitPendingDesireAfterDialogue } from './desireNext';
 import { sanitizeCharacterDialogue } from './dialogueSanitize';
@@ -64,9 +113,13 @@ import {
 } from './disciplineSession';
 import { tryCommitPlayerTaskAgenda } from './characterAgenda';
 import {
+  handleSleepInterruptFromTurn,
   isDeepSleeping,
+  isInSleepSystem,
   leaveSleepSystem,
   markSleepDisturbed,
+  maybeReturnToSleepFromSpeech,
+  sleepBackIfLeftAloneAfterWake,
   proactiveContactBlockReason,
   tryCommitSleepFromDialogue,
   tryWakeFromSpeech,
@@ -261,6 +314,12 @@ function normalizeResult(
     discipline_valence,
     world_intent,
     bath_intimate_consent: bathConsentRaw,
+    bath_assist_action: parseBathAssistActionField(raw.bath_assist_action),
+    dance_action: parseDanceActionField(raw.dance_action),
+    anfu_action: parseAnfuActionField(raw.anfu_action),
+    minigame_action: parseMiniGameActionField(raw.minigame_action),
+    anfu_gain: parseAnfuGainField(raw.anfu_gain),
+    anfu_bonus: parseAnfuBonusField(raw.anfu_bonus),
     stim_target,
     stim_zones,
     stim_intensity,
@@ -296,16 +355,17 @@ export type PlayerDialogueOpts = {
   onWorldSynced?: () => void;
 };
 
+const MAX_DIALOGUE_ATTEMPTS = 2;
+
 function sameDialogueReality(
   a: ReturnType<typeof captureDialogueSceneSnapshot>,
   b: ReturnType<typeof captureDialogueSceneSnapshot>,
 ): boolean {
-  return (
-    a.roomId === b.roomId &&
-    a.activity === b.activity &&
-    a.behavior === b.behavior &&
-    a.skinKey === b.skinKey
-  );
+  // 只比对「房间」。
+  // behavior / skinKey / activity 会被后台心跳、情绪换装、展示锁随时改写；把它们
+  // 算进来会让一次正常生成被判成「场景漂移」而整轮重来，玩家看到气泡文字来回换
+  // 几次才真正发出来（首字延迟数倍）。外观/活动漂移交世界同步在提交后拉正。
+  return a.roomId === b.roomId;
 }
 
 export async function runPlayerDialogue(
@@ -337,9 +397,7 @@ export async function runPlayerDialogue(
   }
   const closeHint = isProactive
     ? ''
-    : isDisciplineActiveFor(living, req.characterId)
-      ? '你正处于小黑屋束缚中：end_conversation 必须 false；禁止假装未进房或逃走。'
-      : looksLikePlayerClosing(req.playerMessage)
+    : looksLikePlayerClosing(req.playerMessage)
       ? '玩家本轮像在收尾/应承/告别：优先 end_conversation=true，给收尾句，禁止再派新任务。'
       : looksLikeLowEngagement(req.playerMessage)
         ? '玩家投入很低（短应承）：若话题已尽，请 end_conversation=true；不要为续聊硬编下一件杂事。'
@@ -348,9 +406,7 @@ export async function runPlayerDialogue(
   const wantContinueHint =
     req.turnMode === 'outfit_reveal'
       ? '本轮是换装完成同步：want_continue=false，skin_change=""，只按新立绘说话。'
-      : isDisciplineActiveFor(living, req.characterId)
-        ? '小黑屋中：want_continue 默认 false；只有话真没说完才 true。禁止连发近义抗拒句。'
-        : isProactive
+      : isProactive
           ? '若你还想一口气接着说（不等指挥官回），可 want_continue=true；若说完该等对方了则 want_continue=false。禁止无意义复读。'
           : '若性格话痨且话题未尽、指挥官刚应承完你仍想补一句，可 want_continue=true；多数情况 false。';
 
@@ -359,10 +415,7 @@ export async function runPlayerDialogue(
     .slice(-3)
     .map((t) => t.text.trim())
     .filter(Boolean);
-  const disciplineAntiRepeat =
-    isDisciplineActiveFor(living, req.characterId) && recentAssistant.length > 0
-      ? '小黑屋姿势切换后禁止复用上一轮金句/口头禅/战吼半句；必须换全新措辞。'
-      : '';
+  const disciplineAntiRepeat = '';
   const antiRepeatHint =
     recentAssistant.length > 0
       ? `${disciplineAntiRepeat}禁止复读或近义改写你刚说过的话（含长片段重叠）：${recentAssistant.map((t) => `「${t.slice(0, 36)}」`).join('、')}。`
@@ -382,8 +435,8 @@ export async function runPlayerDialogue(
     /** 仅 ignore_player_ask 时保留首稿（流式已展示），避免硬钳地点模板盖掉 */
     let softAskKeep: LlmDialogueResult | undefined;
 
-    // 场景漂移重试 + 现实守卫重试（最多 3 次生成）
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    // 场景漂移重试 + 现实守卫重试（最多 2 次生成；3 次会让首字延迟翻倍）
+    for (let attempt = 0; attempt < MAX_DIALOGUE_ATTEMPTS; attempt += 1) {
       if (attempt > 0) opts?.onDialogueRegenerating?.();
       const localGpu = isLocalHomeGpuDialoguePath();
       const charModel = localGpu ? resolveCharacterModel(req.characterId) : '';
@@ -418,7 +471,7 @@ export async function runPlayerDialogue(
         const eventLockHint = coNow
           ? `此刻同屏事件是「${coNow.eventName}」，dialogue 必须扣住这件事与同场同伴，禁止聊无关沙尘/风向。`
           : '';
-        const footer = `（请只输出要求的 JSON 对象；键顺序建议先 dialogue，再 emotion/emotion_pose，其余字段其后。dialogue 必须先直接回应指挥官本轮原话，禁止自说自话演欲望/外观独角戏；禁止复读旧台词；禁止「才不是」类统一傲娇。action 与 inner_thought 本轮必填，各一句中文，不得空。记得填写 end_conversation / end_reason / interrupt_reaction / want_continue，以及 scene_beat、desire_next、memory_write、world_intent（无则 ""）。成人事件刺激字段 stim_target/stim_zones/stim_intensity/stim_duration/adult_odd_mood/oil_discharge 仅相关时填，否则 ""。涉及买/卖/送礼/吃东西时填 camp_item_action，否则 ""。钱不够或仓库没货时不要假装成功。${eventLockHint}${closeHint ? ` ${closeHint}` : ''}${antiRepeatHint ? ` ${antiRepeatHint}` : ''} ${wantContinueHint}${realityHint ? ` ${realityHint}` : ''}）`;
+        const footer = `（请只输出要求的 JSON 对象；键顺序建议先 dialogue，再 emotion/emotion_pose，其余字段其后。dialogue 必须先直接回应指挥官本轮原话，禁止自说自话演欲望/外观独角戏；禁止复读旧台词；禁止「才不是」类统一傲娇。action 与 inner_thought 本轮必填，各一句中文，不得空。记得填写 end_conversation / end_reason / interrupt_reaction / want_continue，以及 scene_beat、desire_next、memory_write、world_intent（无则 ""）。涉及买/卖/送礼/吃东西时填 camp_item_action，否则 ""。钱不够或仓库没货时不要假装成功。${eventLockHint}${closeHint ? ` ${closeHint}` : ''}${antiRepeatHint ? ` ${antiRepeatHint}` : ''} ${wantContinueHint}${realityHint ? ` ${realityHint}` : ''}）`;
         return [
           { role: 'system' as const, content: systemWithLife },
           ...history,
@@ -430,8 +483,10 @@ export async function runPlayerDialogue(
       }, streamOpts);
       if (!isCurrentDialogueRequest(lease)) throw new DOMException('Superseded dialogue', 'AbortError');
       if (!sameDialogueReality(requestScene, captureDialogueSceneSnapshot(living, req.characterId))) {
-        console.info(`[dialogue-retry] ${req.characterId}: scene or skin changed during generation`);
-        continue;
+        console.info(`[dialogue-retry] ${req.characterId}: scene changed during generation`);
+        // 最后一次生成即使房间漂移也采用：宁可让本轮台词落地（世界同步随后拉正），
+        // 也不要再重来一整轮把玩家晾在原地。
+        if (attempt < MAX_DIALOGUE_ATTEMPTS - 1) continue;
       }
 
       result = normalizeResult(raw, req.characterId);
@@ -458,6 +513,7 @@ export async function runPlayerDialogue(
           req,
           issues,
           result.dialogue,
+          result.dialogue,
         );
         console.info(
           `[dialogue-reality] ${req.characterId}: retry issues=${issues.join(',')}`,
@@ -480,7 +536,7 @@ export async function runPlayerDialogue(
       result = applyDialogueRealityHardClamp(living, req, result, issues, requestScene);
       break;
     }
-  if (!raw || !result || !isCurrentDialogueRequest(lease) || !sameDialogueReality(requestScene, captureDialogueSceneSnapshot(living, req.characterId))) {
+  if (!raw || !result || !isCurrentDialogueRequest(lease)) {
     throw new DOMException('Dialogue context changed before commit', 'AbortError');
   }
 
@@ -497,7 +553,7 @@ export async function runPlayerDialogue(
   const inDiscipline = isDisciplineActiveFor(living, req.characterId);
 
   // 软兜底：明确告别时若模型漏标结束 → 仍收束；短应承交给模型判断（主动发言轮跳过）
-  // 小黑屋束缚中禁止收束逃走
+  // 事件中禁止收束逃走
   if (
     !inDiscipline &&
     !isProactive &&
@@ -538,7 +594,7 @@ export async function runPlayerDialogue(
   }
 
   // 忙碌态被连续打扰：若模型已标 annoyed/angry 却未结束 → 强制结束
-  // 小黑屋会话排除（束缚中不能因「烦」关掉对话逃走）
+  // 事件会话排除（事件中不能因「烦」关掉对话逃走）
   if (!inDiscipline) {
     const act = resolvePresence(req.characterId, living).activity;
     const dnd = ['sleeping', 'bathe', 'maintain', 'busy', 'guard'].includes(act);
@@ -555,7 +611,7 @@ export async function runPlayerDialogue(
     }
   }
 
-  // 小黑屋硬钳制：无法离开、无法换装逃走；抑制连珠炮 want_continue
+  // 事件硬钳制：抑制连珠炮 want_continue
   if (inDiscipline) {
     result = {
       ...result,
@@ -659,7 +715,7 @@ export async function runPlayerDialogue(
     living.characterStatus[req.characterId] = [...cur].slice(0, 4) as LightStatusTag[];
   }
 
-  // 小黑屋：记录 valence、解除姿势等待、消费 justEntered；非调教时消费 justLeft / AI 明确求进
+  // 事件会话：记录 valence、解除姿势等待、消费 justEntered / justLeft
   if (isDisciplineActiveFor(living, req.characterId)) {
     recordDisciplineValenceHint(living, req.characterId, result.discipline_valence as 'tragic' | 'mixed' | 'joyful' | undefined);
     clearDisciplinePoseAwaiting(living, req.characterId);
@@ -719,16 +775,31 @@ export async function runPlayerDialogue(
 
   if (result.interrupt_reaction === 'annoyed' || result.interrupt_reaction === 'angry') {
     const cur = new Set(living.characterStatus[req.characterId] ?? []);
+    // 安抚疲惫（anfu_done）后入睡被打扰：疲惫很低=大幅扣好感 + 影响次日心情；
+    // 普通睡眠被打扰走原逻辑。
+    const anfuTired =
+      (living.characterStatus[req.characterId] ?? []).includes('fatigue') &&
+      (living.memories?.[req.characterId] ?? []).some(
+        (m) => m.kind === 'event' && /安抚值满|安抚疲惫/.test(m.summary ?? ''),
+      );
     const tag: LightStatusTag =
       result.interrupt_reaction === 'angry' ? 'anxiety_state' : 'fatigue';
     cur.add(tag);
     living.characterStatus[req.characterId] = [...cur].slice(0, 4) as LightStatusTag[];
-    // 模型未扣好感时给保底惩罚（性格仍可通过 LLM 的 affection_change 放大）
-    const floor = result.interrupt_reaction === 'angry' ? -4 : -2;
+    // 模型未扣好感时给保底扣分（性格仍可通过 LLM 的 affection_change 放大）；
+    // 安抚疲惫态被打扰：保底翻倍并记高重要记忆（含次日心情语义）
+    const floor = result.interrupt_reaction === 'angry' ? (anfuTired ? -8 : -4) : (anfuTired ? -4 : -2);
     if ((result.affection_change ?? 0) > floor) {
       const extra = floor - (result.affection_change ?? 0);
       adjustAffinity(living, req.characterId, extra);
       result = { ...result, affection_change: floor };
+    }
+    if (anfuTired) {
+      pushMemory(living, req.characterId, {
+        kind: 'event',
+        summary: '安抚满足后的疲惫睡眠被打扰，明日心情都会受影响（语气带刺、容易累）',
+        importance: 7,
+      });
     }
     if (isDeepSleeping(living, req.characterId)) {
       markSleepDisturbed(
@@ -739,12 +810,51 @@ export async function runPlayerDialogue(
     }
   }
 
-  // 睡眠中主动惊醒 / 指挥官让睡 / 对白决定起床
+  // 睡眠中主动惊醒 / 指挥官让睡 / 对白决定起床（由角色意愿决定，不硬锁）
   {
     const speech = `${result.dialogue ?? ''} ${result.action ?? ''} ${result.end_reason ?? ''}`;
-    if (tryWakeFromSpeech(living, req.characterId, speech)) {
-      /* 已脱离睡眠 → 睡衣站立 */
-    } else if (
+    const wakeOutcome = isProactive
+      ? 'none'
+      : handleSleepInterruptFromTurn(living, req.characterId, {
+          speech,
+          interruptReaction: result.interrupt_reaction,
+        });
+    if (wakeOutcome === 'cant_wake') {
+      // 太沉了：这一轮只可能是梦话/翻身，世界与立绘保持睡眠循环
+      pushRecentChat(
+        living,
+        req.characterId,
+        'user',
+        '【系统事实】她睡得太沉，本轮只发出梦呓/翻身，没有醒来；不得认为自己已起床或已答应任何活动。',
+      );
+      pushCampLog(living, {
+        text: `${CHARACTER_MAP[req.characterId]?.name ?? req.characterId} 睡得太沉，叫不醒（只翻了个身）`,
+        source: 'system',
+        characterIds: [req.characterId],
+      });
+    } else if (wakeOutcome === 'kept_sleeping') {
+      pushRecentChat(
+        living,
+        req.characterId,
+        'user',
+        '【系统事实】她选择继续睡（或赌气不理），仍然在睡觉；不得描写起床做别的事。',
+      );
+    } else if (wakeOutcome === 'woke') {
+      pushRecentChat(
+        living,
+        req.characterId,
+        'user',
+        '【系统事实】她已经被叫醒，穿着星夜睡衣起身；可以聊天、换装或去做别的事。',
+      );
+      pushCampLog(living, {
+        text: `${CHARACTER_MAP[req.characterId]?.name ?? req.characterId} 被叫醒（仍穿着星夜睡衣）`,
+        source: 'system',
+        characterIds: [req.characterId],
+      });
+    }
+    if (
+      wakeOutcome !== 'woke' &&
+      wakeOutcome !== 'cant_wake' &&
       !isProactive &&
       tryCommitSleepFromDialogue(
         living,
@@ -765,19 +875,25 @@ export async function runPlayerDialogue(
         characterIds: [req.characterId],
       });
       result = { ...result, end_conversation: true, want_continue: false };
-    } else if (
-      isDeepSleeping(living, req.characterId) &&
-      result.end_conversation &&
-      /睡|醒|吵|休息|困/.test(speech)
-    ) {
-      leaveSleepSystem(living, req.characterId, {
-        reason: result.end_reason || '被打扰后决定不再睡',
-        completed: false,
-      });
+    } else if (!isInSleepSystem(living, req.characterId)) {
+      // 已醒着：她也可以自己说「再睡会儿」而重新窝回床上（好感小幅下滑）
+      if (!maybeReturnToSleepFromSpeech(living, req.characterId, speech) && result.end_conversation) {
+        // 刚被叫醒、聊两句指挥官就走 → 她又睡回去（好感 -1）
+        sleepBackIfLeftAloneAfterWake(living, req.characterId);
+      }
     }
   }
 
   const outfitRefused = declinesOutfitChange(result.dialogue, result.action);
+  // 舞蹈/安抚等独占事件进行中：外观由会话唯一持有，AI 的换装/移动一律丢弃
+  // （历史 BUG：舞蹈准备态里模型填了 skin_change → 排在换装队列 → 立绘卡在「换装中」）
+  if (
+    isDanceActiveFor(living, req.characterId) ||
+    isAnfuActiveFor(living, req.characterId) ||
+    isDisciplineActiveFor(living, req.characterId)
+  ) {
+    result = { ...result, skin_change: '', world_intent: undefined };
+  }
   if (outfitRefused && !isDisciplineActiveFor(living, req.characterId)) {
     cancelPendingOutfitChange(living, req.characterId);
     result = {
@@ -794,9 +910,22 @@ export async function runPlayerDialogue(
     };
   }
 
+  // 舞蹈/浴室/安抚的「邀请待回应」期间，角色说「换衣服/换舞装/等我换好」
+  // 是在为事件做准备，不能让通用换装协议把它劫持成「特殊服装01」。
+  const eventAskPending =
+    Boolean(living.pendingPlayerDanceAsk?.characterId === req.characterId) ||
+    Boolean(living.pendingPlayerBathAssistAsk?.characterId === req.characterId) ||
+    Boolean(living.pendingPlayerAnfuAsk?.characterId === req.characterId) ||
+    Boolean(living.pendingDanceInvite?.characterId === req.characterId) ||
+    Boolean(living.pendingBathAssistInvite?.characterId === req.characterId) ||
+    Boolean(living.pendingAnfuInvite?.characterId === req.characterId);
+
   if (
     req.turnMode !== 'outfit_reveal' &&
     !outfitRefused &&
+    // 事件邀请待回应期间：角色说「换衣服/等我换好」是在为事件换装，别被通用换装协议
+    // 劫持成「特殊服装01」。但模型显式填了 skin_change 时仍尊重之。
+    !(eventAskPending && !result.skin_change) &&
     (result.skin_change ||
       OUTFIT_SPEECH_RE.test(
         `${result.dialogue}${result.action ?? ''}${req.playerMessage}`,
@@ -838,7 +967,7 @@ export async function runPlayerDialogue(
         pushMemory(living, req.characterId, {
           kind: 'event',
           summary: bathR.consented
-            ? `洗浴互动：脱掉浴巾（成人动态${bathR.source === 'infer' ? '·对白推断' : ''}）`
+            ? `洗浴互动：解下浴巾（解巾后动态${bathR.source === 'infer' ? '·对白推断' : ''}）`
             : '洗浴互动：仍裹/重新裹浴巾（立绘回冲澡待机）',
           importance: 5,
         });
@@ -853,7 +982,256 @@ export async function runPlayerDialogue(
     }
   }
 
-  // 成人事件：身体敏感点刺激落盘（浴室亲密 / 小黑屋 / 成人话题）
+  // 浴室互动：指挥官提出（按钮/打字）结算 / 角色主动提出（邀请条）/ 结束
+  {
+    const bathAction = result.bath_assist_action;
+    const bathSpeech = `${result.dialogue ?? ''} ${result.action ?? ''} ${result.inner_thought ?? ''}`;
+
+    if (isBathAssistActiveFor(living, req.characterId)) {
+      // 互动进行中：只有明确收尾才结束；其余一律当作"还在浴室里"
+      if (bathAction === 'end' || detectAiBathAssistEnd(bathSpeech)) {
+        const r = leaveBathAssistSession(liveSave, living, { reason: '角色收尾/指挥官叫停' });
+        if (r?.systemLine) living.bathAssistUiFlash = r.systemLine;
+        result = { ...result, bath_assist_action: undefined };
+      }
+    } else {
+      // 指挥官已提出、等本轮答复：同意→发确认条；拒绝→取消
+      const resolved = resolvePlayerBathAssistAskFromTurn(liveSave, living, req.characterId, {
+        bathAssistAction: bathAction,
+        dialogue: result.dialogue ?? '',
+        action: result.action,
+      });
+      if (resolved) {
+        if (resolved.systemLine) living.bathAssistUiFlash = resolved.systemLine;
+        result = { ...result, bath_assist_action: undefined };
+      } else if (bathAction === 'propose_help' || bathAction === 'propose_co') {
+        // 角色主动提出：只挂邀请条，等指挥官确认（不直接拖进场景）
+        const mode = bathAction === 'propose_co' ? 'co_bath' : 'help_wash';
+        const offered = maybeProposeBathAssistInvite(living, req.characterId, result.dialogue ?? '', mode);
+        if (offered) {
+          const name = CHARACTER_MAP[req.characterId]?.name ?? req.characterId;
+          living.bathAssistUiFlash = `【系统】${name}提出${mode === 'co_bath' ? '一同泡澡' : '帮指挥官清洗'}。点「去浴室」确认后才会开始。`;
+        }
+        result = { ...result, bath_assist_action: undefined };
+      }
+    }
+  }
+
+  // 舞蹈事件：指挥官邀请结算 / 角色主动邀请 / 停下·继续 / 结束
+  {
+    const danceAction = result.dance_action;
+    const speech = `${result.dialogue ?? ''} ${result.action ?? ''} ${result.inner_thought ?? ''}`;
+
+    if (isDanceActiveFor(living, req.characterId)) {
+      const sess = getDanceSession(living)!;
+      if (danceAction === 'end') {
+        // 结束整个舞蹈事件：换下舞装 + 离开大厅
+        const r = leaveDanceSession(liveSave, living, { reason: '角色收尾/指挥官叫停' });
+        if (r?.systemLine) living.danceUiFlash = r.systemLine;
+        result = { ...result, dance_action: undefined };
+      } else if (danceAction === 'stop' || detectAiStopsDance(speech)) {
+        // 只是停下休息：回舞蹈待机，事件继续（之后可以再开始/自己换装）
+        if (sess.phase === 'dancing') {
+          returnToPrepare(liveSave, living, req.characterId);
+          living.danceUiFlash = '【系统】停下休息，回到舞蹈待机（舞蹈事件仍在，可以再开始）。';
+        }
+        result = { ...result, dance_action: undefined };
+      } else if (danceAction === 'start_co') {
+        if (sess.phase === 'dressing' || sess.phase === 'unveil' || sess.phase === 'travel') {
+          sess.mode = 'co';
+          living.danceUiFlash =
+            sess.phase === 'travel'
+              ? '【系统】还在去大厅的路上，到了就一起跳。'
+              : sess.phase === 'unveil'
+                ? '【系统】正在换演出服，马上一起跳。'
+                : '【系统】换好舞装就一起跳。';
+        } else if (sess.phase === 'dancing' && sess.mode === 'co') {
+          // 已在共舞：保持连续，不重复播「共舞开始」
+        } else {
+          beginCoDance(liveSave, living, req.characterId);
+          living.danceUiFlash = '【系统】换演出服，马上共舞。';
+        }
+        result = { ...result, dance_action: undefined };
+      } else if (
+        danceAction === 'start_solo' ||
+        (detectAiContinuesDance(speech) && sess.phase !== 'dancing')
+      ) {
+        if (sess.phase === 'dressing' || sess.phase === 'unveil' || sess.phase === 'travel') {
+          sess.mode = 'solo';
+          living.danceUiFlash =
+            sess.phase === 'travel'
+              ? '【系统】还在去大厅的路上，到了就跳。'
+              : sess.phase === 'unveil'
+                ? '【系统】正在换演出服，马上起舞。'
+                : '【系统】换好舞装就开始跳。';
+        } else if (sess.phase === 'dancing' && sess.mode === 'solo') {
+          setSoloPaused(living, req.characterId, false);
+        } else {
+          beginSoloDance(liveSave, living, req.characterId);
+          living.danceUiFlash = '【系统】换演出服，马上独舞。';
+        }
+        result = { ...result, dance_action: undefined };
+      }
+    } else {
+      const resolved = resolvePlayerDanceAskFromTurn(liveSave, living, req.characterId, {
+        danceAction,
+        dialogue: result.dialogue ?? '',
+        action: result.action,
+      });
+      if (resolved) {
+        if (resolved.systemLine) living.danceUiFlash = resolved.systemLine;
+        if (!resolved.ok) {
+          pushMemory(living, req.characterId, {
+            kind: 'event',
+            summary: resolved.msg,
+            importance: 4,
+          });
+        }
+        result = { ...result, dance_action: undefined };
+      } else if (danceAction === 'start_co' || danceAction === 'start_solo') {
+        // 模型表示愿意：只弹「去大厅」确认条，绝不直接拉进场景
+        const mode = danceAction === 'start_co' ? ('co' as const) : ('solo' as const);
+        const offered = offerDanceInviteFromTurn(living, req.characterId, mode);
+        const name = CHARACTER_MAP[req.characterId]?.name ?? req.characterId;
+        if (offered) {
+          living.danceUiFlash = `【系统】${name}愿意「${mode === 'co' ? '一同跳舞' : '跳舞给你看'}」。点「去大厅」确认后才会开始。`;
+        }
+        result = { ...result, dance_action: undefined };
+      } else if (danceAction === 'propose_solo' || danceAction === 'propose_co') {
+        const mode = danceAction === 'propose_co' ? ('co' as const) : ('solo' as const);
+        maybeProposeDanceInvite(living, req.characterId, result.dialogue ?? '', mode);
+        result = { ...result, dance_action: undefined };
+      }
+    }
+    consumeDanceJustEntered(living, req.characterId);
+  }
+
+  // 安抚室：指挥官邀请结算 / 角色主动邀请 / 攻击结算 / 满足结算 / 结束
+  {
+    const anfuAction = result.anfu_action;
+    const anfuSession = living.anfuSession?.active ? living.anfuSession : null;
+    const inAnfu = isAnfuActiveFor(living, req.characterId);
+
+    if (inAnfu && anfuSession) {
+      // 安抚事件期间：皮肤/场景由会话独占，AI 的 skin_change 与 world_intent 一律丢弃
+      result = { ...result, skin_change: '', world_intent: undefined };
+      if (anfuSession.phase === 'soothing') {
+        // 攻击结算：awaitingAttackReply 时用本轮 gain 落盘；无锁则视为聊天轮（被动涨幅由 tick 驱动）
+        if (anfuSession.awaitingAttackReply) {
+          const hasGain = result.anfu_gain != null;
+          resolveAnfuAttackGain(liveSave, living, req.characterId, {
+            gain: result.anfu_gain,
+            fallback: !hasGain,
+          });
+        }
+      }
+      // 尾声（安抚值满）：角色也可以主动选择离开；中途仍由玩家点按钮决定。
+      // 任何离开都会由 leaveAnfuSession 写入系统事实，并在聊天面板显示。
+      const leaveSpeech = /我(?:先|该|要|想)?(?:走|离开|回去|回房)|先回房|先回去|我要走了|该走了/;
+      if (anfuSession.phase === 'exhausted') {
+        if (
+          anfuAction === 'end' ||
+          leaveSpeech.test(`${result.dialogue ?? ''} ${result.action ?? ''}`)
+        ) {
+          const r = leaveAnfuSession(liveSave, living, { reason: 'leave' });
+          if (r.systemLine) living.anfuUiFlash = r.systemLine;
+        }
+      } else if (anfuAction === 'end') {
+        living.anfuUiFlash = '【系统】想结束安抚的话，请点「结束安抚」确认。';
+      }
+      result = { ...result, anfu_action: undefined, anfu_gain: undefined };
+    } else {
+      const resolved = resolvePlayerAnfuAskFromTurn(liveSave, living, req.characterId, {
+        anfuAction,
+        dialogue: result.dialogue ?? '',
+        action: result.action,
+      });
+      if (resolved) {
+        if (resolved.systemLine) living.anfuUiFlash = resolved.systemLine;
+        if (!resolved.ok) {
+          pushMemory(living, req.characterId, {
+            kind: 'event',
+            summary: resolved.msg,
+            importance: 4,
+          });
+        }
+        result = { ...result, anfu_action: undefined, anfu_gain: undefined };
+      } else if (anfuAction === 'start') {
+        // 模型表示愿意：只弹确认条，绝不直接拉人进安抚室
+        const offered = offerAnfuInviteFromTurn(living, req.characterId);
+        const name = CHARACTER_MAP[req.characterId]?.name ?? req.characterId;
+        if (offered) {
+          living.anfuUiFlash = `【系统】${name}愿意去安抚室。点「去安抚室」确认后才会过去。`;
+        }
+        result = { ...result, anfu_action: undefined, anfu_gain: undefined };
+      } else if (anfuAction === 'propose') {
+        maybeProposeAnfuInvite(living, req.characterId, result.dialogue ?? '');
+        result = { ...result, anfu_action: undefined, anfu_gain: undefined };
+      } else {
+        // 非安抚上下文：角色对白里顺口提到安抚 → 转邀请条（需资源/每日门）
+        if (anfuAction == null && detectAiAnfuPropose(`${result.dialogue ?? ''} ${result.action ?? ''}`)) {
+          maybeProposeAnfuInvite(living, req.characterId, result.dialogue ?? '');
+        }
+      }
+    }
+    consumeAnfuJustEntered(living, req.characterId);
+  }
+
+  // 小游戏（五子棋/猜拳）：对局中认输 / 会话外邀请结算 / 角色主动邀请 / 赛后约定应答
+  {
+    const minigameAction = result.minigame_action;
+    const mgSpeech = `${result.dialogue ?? ''} ${result.action ?? ''} ${result.inner_thought ?? ''}`;
+
+    if (isMiniGameActiveFor(living, req.characterId)) {
+      // 对局为独立事件：棋局走面板与本地引擎，LLM 只允许口头认输（quit），其余一律无视
+      if (minigameAction === 'quit') {
+        const r = aiQuitMiniGame(liveSave, living);
+        if (r.systemLine) living.miniGameUiFlash = r.systemLine;
+      }
+      result = { ...result, minigame_action: undefined };
+    } else {
+      const resolved = resolvePlayerMiniGameAskFromTurn(liveSave, living, req.characterId, {
+        minigameAction,
+        dialogue: result.dialogue ?? '',
+        action: result.action,
+      });
+      if (resolved) {
+        if (resolved.systemLine) living.miniGameUiFlash = resolved.systemLine;
+        if (!resolved.ok) {
+          pushMemory(living, req.characterId, {
+            kind: 'event',
+            summary: resolved.msg,
+            importance: 4,
+          });
+        }
+        result = { ...result, minigame_action: undefined };
+      } else if (minigameAction === 'start_gomoku' || minigameAction === 'start_rps') {
+        // 模型表示愿意：只弹确认条，绝不直接开局
+        const kind = minigameAction === 'start_gomoku' ? ('gomoku' as const) : ('rps' as const);
+        const offered = offerMiniGameInviteFromTurn(living, req.characterId, kind);
+        const name = CHARACTER_MAP[req.characterId]?.name ?? req.characterId;
+        if (offered) {
+          living.miniGameUiFlash = `【系统】${name}愿意和你来一局${kind === 'gomoku' ? '五子棋' : '猜拳'}。点「开始」确认后才会开局。`;
+        }
+        result = { ...result, minigame_action: undefined };
+      } else if (minigameAction === 'propose_gomoku' || minigameAction === 'propose_rps') {
+        const kind = minigameAction === 'propose_gomoku' ? ('gomoku' as const) : ('rps' as const);
+        maybeProposeMiniGameInvite(living, req.characterId, result.dialogue ?? '', kind);
+        result = { ...result, minigame_action: undefined };
+      } else if (minigameAction === 'accept_stake' || minigameAction === 'refuse_stake') {
+        const stakeLine = resolveMiniGameStake(living, req.characterId, minigameAction === 'accept_stake');
+        if (stakeLine) living.miniGameUiFlash = stakeLine;
+        result = { ...result, minigame_action: undefined };
+      } else if (minigameAction == null) {
+        // 非小游戏上下文：角色对白里顺口提到想玩 → 转邀请条（需房间门）
+        const kindHint = detectAiMiniGamePropose(mgSpeech);
+        if (kindHint) maybeProposeMiniGameInvite(living, req.characterId, result.dialogue ?? '', kindHint);
+      }
+    }
+    consumeMiniGameJustEntered(living, req.characterId);
+  }
+
+  // 亲密氛围：亲近区刺激落盘（浴室 / 暧昧话题）
   {
     const adultCtx = detectAdultEventContext({
       living,
@@ -877,15 +1255,16 @@ export async function runPlayerDialogue(
     if (stimR.applied && 'msg' in stimR && stimR.msg) {
       pushMemory(living, req.characterId, {
         kind: 'event',
-        summary: `成人敏感：${stimR.msg}`,
+        summary: `亲近氛围：${stimR.msg}`,
         importance: 5,
       });
-      console.info(`[adult-events] ${req.characterId}: ${stimR.msg}`);
+      console.info(`[intimacy] ${req.characterId}: ${stimR.msg}`);
     }
   }
 
   {
     const worldR = syncDialogueWorldRealtime(liveSave, living, req.characterId, {
+      playerMessage: req.playerMessage,
       dialogue: result.dialogue,
       action: result.action,
       inner_thought: result.inner_thought,

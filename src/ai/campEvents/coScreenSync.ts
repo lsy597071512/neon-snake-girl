@@ -8,9 +8,11 @@ import {
 import { CAMP_ROOM_MAP } from '../../data/campLayout';
 import type { SaveData } from '../../types';
 import { snapAgentToRoom } from '../campAgents';
-import { isDeepSleeping, leaveSleepSystem } from '../sleepSystem';
+import { planTravel } from '../travel';
+import { isInSleepSystem, leaveSleepSystem, sleepWakeDifficulty } from '../sleepSystem';
 import type { AiLivingSave, CampEventInstance } from '../types';
-import { EVENT_AUTO_SKIN, setEventTempSkin } from './campEventEffects';
+import { EVENT_AUTO_SKIN } from './campEventEffects';
+import { scheduleEventTempSkinChange } from '../outfitChangeProcess';
 import { getCampEventDef } from './catalog';
 
 /** 任何多人同屏活动最多 6 人（含焦点角色） */
@@ -48,10 +50,21 @@ export function syncCoScreenParticipantWorld(
   if (!def?.allowsCoScreen) return;
 
   const cap = resolveCoScreenJoinCap(def.maxJoiners);
-  const coIds = capCoScreenMemberIds(
+  const capped = capCoScreenMemberIds(
     ev.participants.filter((p) => p.inCoScreen).map((p) => p.characterId),
     cap,
   );
+  // 睡太沉叫不醒的人来不了同屏（不能瞬移+瞬醒）
+  const coIds = capped.filter((id) => {
+    if (!isInSleepSystem(living, id)) return true;
+    if (sleepWakeDifficulty(living, id).wakeable) return true;
+    const part = ev.participants.find((p) => p.characterId === id);
+    if (part) {
+      part.inCoScreen = false;
+      part.arrived = false;
+    }
+    return false;
+  });
   ev.coScreenIds = coIds.length >= 2 ? coIds : [];
 
   ev.meta = {
@@ -72,29 +85,52 @@ export function syncCoScreenParticipantWorld(
     const part = ev.participants.find((p) => p.characterId === id);
     if (part) part.arrived = true;
 
-    if (isDeepSleeping(living, id)) {
+    // 叫不醒的人不进同屏：睡得太沉就是来不了（不能瞬移+瞬醒）
+    if (isInSleepSystem(living, id)) {
+      if (!sleepWakeDifficulty(living, id).wakeable) {
+        if (part) {
+          part.arrived = false;
+          part.inCoScreen = false;
+        }
+        continue;
+      }
       leaveSleepSystem(living, id, {
         reason: `被营地事件「${def.name}」叫醒`,
         completed: false,
       });
     }
 
-    snapAgentToRoom(id, targetRoom, {
-      activity: def.arriveActivity,
-      behavior,
-    });
-
-    const prev = living.bodyAnchors[id];
-    living.bodyAnchors[id] = {
-      roomId: targetRoom,
-      activity: def.arriveActivity,
-      behavior,
-      atGameMin: living.gameMinutes,
-      seq: (prev?.seq ?? 0) + 1,
-    };
+    const curRoom = living.bodyAnchors?.[id]?.roomId;
+    const fromRoom = curRoom && CAMP_ROOM_MAP[curRoom] ? curRoom : targetRoom;
+    if (fromRoom !== targetRoom) {
+      // 赴约要走路：到点才落点/切场景
+      planTravel(living, id, targetRoom, fromRoom, {
+        activity: def.arriveActivity,
+        behavior: `去${roomLabel(targetRoom)}参加「${def.name}」`,
+        reason: 'coscreen',
+        arriveBehavior: behavior,
+      });
+    } else {
+      snapAgentToRoom(id, targetRoom, {
+        activity: def.arriveActivity,
+        behavior,
+      });
+      const prev = living.bodyAnchors[id];
+      living.bodyAnchors[id] = {
+        roomId: targetRoom,
+        activity: def.arriveActivity,
+        behavior,
+        atGameMin: living.gameMinutes,
+        seq: (prev?.seq ?? 0) + 1,
+      };
+    }
 
     if (getCharacterSkin(id, skinId)) {
-      setEventTempSkin(save, living, id, skinId, ev.instanceId);
+      // 其它事件会话（舞蹈/安抚/浴室/调教）独占时不得被同屏统一皮覆盖
+      const inst = living.eventTempSkins?.[id]?.eventInstanceId;
+      if (inst && inst !== ev.instanceId) continue;
+      // 统一事件外覆也要「先换衣再显形」
+      scheduleEventTempSkinChange(living, id, skinId, ev.instanceId, 2_600);
     }
   }
 }

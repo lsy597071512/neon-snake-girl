@@ -228,9 +228,12 @@
   position: relative;
   width: 100%;
   flex-shrink: 0;
-  aspect-ratio: 16 / 7.5;
-  min-height: clamp(120px, 32vw, 200px);
-  max-height: 220px;
+  /* 商店老板娘 / 编队看板素材均为竖版（约 9:16）。
+     此前 16:7.5 的横条把竖版图压成 1/4 宽，观感即「图标严重拉伸」。
+     改为接近竖版的横幅比例，配合 contain 完整呈现素材构图。 */
+  aspect-ratio: 16 / 11;
+  min-height: clamp(150px, 40vw, 240px);
+  max-height: 260px;
 }
 
 .wl-sub-hero-frame {
@@ -238,6 +241,8 @@
   inset: 0;
   width: 100%;
   height: 100%;
+  /* 框体素材比例与容器不一致时，fill 会把描边横向拉变形；
+     改用 100% 铺满的拉伸容差控制：仅允许极小幅变形，边框仍贴合容器 */
   object-fit: fill;
   pointer-events: none;
 }
@@ -249,21 +254,204 @@
   border-radius: 2px;
 }
 
-.wl-sub-hero-art {
+/* ── 商店 hero：店内场景底 + 老板娘立绘（分层，手机打包后背景不再丢失） ── */
+.shop-hero .wl-sub-hero-body {
+  background: #0a0c11;
+}
+
+.shop-hero-bg,
+.shop-hero-keeper {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* 场景底：缓慢横移制造纵深；加载失败时退为纯黑底不破版 */
+.shop-hero-bg {
+  object-fit: cover;
+  object-position: center 34%;
+  filter: saturate(0.95) brightness(0.82) contrast(1.04);
+  animation: shop-hero-drift 26s ease-in-out infinite alternate;
+}
+
+@keyframes shop-hero-drift {
+  from {
+    transform: scale(1.03) translateX(-0.6%);
+  }
+  to {
+    transform: scale(1.1) translateX(0.6%);
+  }
+}
+
+/* 老板娘右侧站位，不遮货架与标题 */
+.shop-hero-keeper {
+  object-fit: contain;
+  object-position: right 2%;
+  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.72)) drop-shadow(0 0 18px rgba(255, 190, 120, 0.16));
+  animation: shop-hero-keeper-breathe 7.5s ease-in-out infinite;
+}
+
+@keyframes shop-hero-keeper-breathe {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1.4%);
+  }
+}
+
+/* 冷暖对冲色调层：左上冷光、右下柜台暖光，统一画面 */
+.shop-hero-tint {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(60% 55% at 22% 18%, rgba(120, 180, 230, 0.16), transparent 70%),
+    radial-gradient(70% 60% at 78% 92%, rgba(255, 176, 96, 0.2), transparent 72%),
+    linear-gradient(180deg, rgba(6, 8, 12, 0.16) 0%, rgba(6, 8, 12, 0) 42%, rgba(6, 8, 12, 0.66) 100%);
+  pointer-events: none;
+}
+
+/* ── 招募入口按钮（图标徽记 + 场景底） ── */
+.recruit-entry {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: clamp(8px, 2.4vw, 14px);
+  width: 100%;
+  padding: clamp(9px, 2.6vw, 14px) clamp(10px, 3vw, 16px);
+  border: 1px solid rgba(255, 214, 140, 0.45);
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+  background: linear-gradient(120deg, rgba(18, 16, 22, 0.9), rgba(28, 20, 14, 0.86));
+  -webkit-tap-highlight-color: transparent;
+  animation: recruit-entry-pulse 3.6s ease-in-out infinite;
+}
+
+@keyframes recruit-entry-pulse {
+  0%,
+  100% {
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5), 0 0 0 rgba(255, 200, 110, 0), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  }
+  50% {
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5), 0 0 22px rgba(255, 200, 110, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  }
+}
+
+.recruit-entry:active {
+  transform: scale(0.985);
+}
+
+.recruit-entry-bg {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: center;
+  object-position: center 42%;
+  opacity: 0.5;
+  filter: saturate(0.9) brightness(0.72);
+  pointer-events: none;
+}
+
+.recruit-entry-veil {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(10, 10, 16, 0.9) 0%, rgba(12, 10, 16, 0.55) 46%, rgba(10, 10, 16, 0.78) 100%),
+    radial-gradient(70% 120% at 8% 50%, rgba(255, 190, 110, 0.16), transparent 60%);
+  pointer-events: none;
+}
+
+.recruit-entry-sigil {
+  position: relative;
+  z-index: 1;
+  width: clamp(34px, 9vw, 46px);
+  height: clamp(34px, 9vw, 46px);
+  display: block;
+  color: #ffd07a;
+  filter: drop-shadow(0 0 10px rgba(255, 190, 110, 0.6));
+  animation: recruit-entry-spin 14s linear infinite;
+}
+
+.recruit-entry-sigil svg {
+  width: 100%;
+  height: 100%;
+}
+
+@keyframes recruit-entry-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.recruit-entry-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.recruit-entry-body strong {
+  font-size: clamp(13px, 3.6vw, 16px);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #f6e6c6;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+}
+
+.recruit-entry-body small {
+  font-size: clamp(9px, 2.6vw, 11px);
+  color: rgba(238, 218, 196, 0.82);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+}
+
+.recruit-entry-go {
+  position: relative;
+  z-index: 1;
+  font-size: clamp(11px, 3vw, 13px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #ffe1a6;
+  white-space: nowrap;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shop-hero-bg,
+  .shop-hero-keeper,
+  .recruit-entry,
+  .recruit-entry-sigil {
+    animation-duration: 0.01ms !important;
+  }
+}
+
+.wl-sub-hero-art {
+  width: 100%;
+  height: 100%;
+  /* cover 只裁切不改变宽高比，绝不会产生"拉伸"；
+     取景偏上，保证人物头部/上半身完整可见 */
+  object-fit: cover;
+  object-position: center 22%;
+  background: linear-gradient(180deg, rgba(10, 12, 16, 0.9) 0%, rgba(6, 8, 12, 0.96) 100%);
 }
 
 .wl-sub-hero-label {
   position: absolute;
   left: 0;
   bottom: 0;
+  right: 0;
   padding: clamp(8px, 2vw, 14px) clamp(12px, 3vw, 18px);
-  background: linear-gradient(0deg, rgba(0, 0, 0, 0.72), transparent);
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.32) 60%, transparent);
   color: #fff;
   line-height: 1.2;
+  pointer-events: none;
 }
 
 .wl-sub-hero-label strong {
@@ -839,4 +1027,24 @@
 
 .shell-sub .cc-header {
   display: none !important;
+}
+
+/* 编队：义体健康标签与重伤禁用 */
+.squad-hp-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(46, 203, 255, 0.16);
+  color: #9be8ff;
+  font-size: 11px;
+}
+.squad-hp-tag.is-zero {
+  background: rgba(255, 60, 60, 0.2);
+  color: #ff8080;
+}
+.squad-pick-btn.is-down {
+  opacity: 0.55;
+}
+.squad-pick-btn:disabled {
+  cursor: not-allowed;
 }

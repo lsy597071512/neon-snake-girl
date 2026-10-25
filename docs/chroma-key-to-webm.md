@@ -1,3 +1,12 @@
+---
+title: 安全抠像与透明 WebM 流程
+created: 2026-08-05
+author: AI-assisted
+last_updated: 2026-10-18
+updated_by: AI-assisted
+status: active
+---
+
 # 安全抠像 → 透明 WebM 流程
 
 > 适用于：绿幕 / 蓝幕 / 品红幕等**纯色背景**实拍或 AI 生成视频，输出 **VP9 + Alpha** 透明 `.webm`。  
@@ -24,6 +33,7 @@
 |------|------|------|------|
 | 快速 colorkey（默认偏狠） | `scripts/chroma_key_gs_video_webm.py`（`0.35/0.08`） | 快、一条 ffmpeg | **易吃发丝/布/道具**；仅适合粗测 |
 | **软 colorkey（纯 `#00b140`）** | 同库，自定义 vf `0.16/0.04` | 快；保角色与道具 | 色偏绿幕会残留 |
+| **色相域解析抠像（渐变绿幕）** | `scripts/chroma_key_lib.py::edge_matte_green_alpha()` | 幕色在画面内漂移也能抠净；主体内绿色配件不受影响 | 每帧 numpy（比 ffmpeg 慢一点） |
 | **绿通道占优抠像** | `key_huanzhuang_h3_to_webm.py --mode green_dom` | 吃掉暗绿/薄荷绿幕；保白衣柜 | 每帧 numpy；略慢 |
 | **安全抠像（rembg）** | `scripts/chroma_key_safe_to_webm.py` | rembg 保护主体 + 阶梯 QA | 慢（每帧 rembg） |
 
@@ -32,9 +42,27 @@
 | 源片情况 | 选用 |
 |----------|------|
 | 标准 H3 纯绿 `#00b140`，无大面积同色道具被误伤 | **软 colorkey** `similarity=0.16` `blend=0.04` |
+| **幕色在画面内漂移**（四角实测互不相同，例如 `(0,120,48)` ↔ `(80,196,146)`） | **`edge_matte_green_alpha()`** 色相域解析抠像 |
 | 四角实测远不是 `#00b140`（偏暗 / 薄荷），或软抠后四角仍不透 | **green_dom**（绿通道占优 + 低饱和强制保留） |
 | 发丝溢色严重、主体易被切、需要 QA 阶梯 | **安全 rembg** `chroma_key_safe_to_webm.py` |
 | 仅冒烟看一眼 | 默认可先软 colorkey；验收不过再升档 |
+
+### 色相域解析抠像（`edge_matte_green_alpha`）
+
+给「幕色不纯」的 H3 片用（实测 `tex/juese/pifu/wuziqi/` 13 条片：幕色在画面内
+从 `(0,120,48)` 漂到 `(48,146,104)`、`(80,196,146)`）。固定色 colorkey 在这种片上
+要么留绿边、要么吃进身体，必须换成色相域判定：
+
+1. **幕色似然** = 绿色色相带（中心 150°，半宽 70°）× 饱和度 × 明度。
+   皮肤（色相 ≈25°）、紫/蓝发（≈220~280°）得分 0，天然不被误伤。
+2. **只删与画面边缘连通的幕布**（`scipy.ndimage.label` 连通域 + 边框取样），
+   主体内部的绿色配件（发梢、瞳色、机械饰件）不会被当成幕布抠掉。
+3. **强制保留**：`R ≥ G` 的像素（皮肤高光/绿光下的肤色）与低饱和像素（白/银发）
+   一律 alpha=1。
+4. **边界 ramp + 去溢色**：`despill_green()` 把半透明边缘的绿通道压到 `max(R,B)`。
+
+参考实现：`scripts/key_wuziqi_h3_to_webm.py`（13 条片全通过 QA）。
+
 
 ---
 
@@ -206,6 +234,38 @@ MiniMax H3 竖屏换装片（角色 + 衣柜道具 + 绿幕）进游戏前，必
 
 ---
 
+## 透明 VP9 的 alpha 是「分离流」：ffprobe 看不见（2026-10 事故沉淀）
+
+**结论先行：永远不要用 `ffprobe` 的 `pix_fmt` 判断文件有没有 alpha。**
+透明 VP9 webm 的 alpha 存在独立附属流里，`ffprobe` 只报主流的 `yuv420p`，
+看起来和不透明文件一模一样。唯一可靠的判据是**用 `-c:v libvpx-vp9`
+解码器真实解一帧**：输出 `RGBA` 且存在 `alpha < 250` 的像素 → 带透明。
+
+实测对照（`tex/juese/pifu/chongzao/SR01_2_pifu03.webm` 等）：
+
+| 检测方式 | 结果 |
+|----------|------|
+| `ffprobe pix_fmt` | `yuv420p`（看不见 alpha，误判为不透明） |
+| 原生解码器解码 → PNG | `mode=RGB`，alpha 全 255（alpha 被直接丢弃） |
+| `-c:v libvpx-vp9` 解码 → PNG | `mode=RGBA`，透明像素约 30%（真身） |
+
+**事故经过**：`tools/WebmStickerEditor.exe` 重编码时沿用了 `ffprobe` 的
+`pix_fmt=yuv420p`，且解码端没指定 libvpx，alpha 在解码/编码两个环节被
+静默丢弃。输出文件在手机上显示为「黑底不透明」（黑色遮罩），而项目原版
+资源全部透明。修法见 `scripts/webm_sticker_editor.py` 的 `_detect_alpha()`、
+`VideoSpec.enc_pix_fmt`（`yuva420p`）与解码端 `-c:v libvpx-vp9`。
+
+**从此以后的铁律**：
+
+1. 判断 alpha 必须 libvpx 真实解码（`_detect_alpha()` 那种做法），
+   **禁止**用 `pix_fmt` / `ALPHA_MODE` 标签做结论（后者时有时无，不可靠）。
+2. 凡是「读入 webm → 输出 webm」的工具，编码必须用源 alpha 探测结果
+   决定 `yuva420p / yuv420p`，**禁止**沿用 probe 来的 pix_fmt。
+3. 导出 QA 必须包含 libvpx 解码回读：输出 `mode=RGBA` 且透明占比与源接近，
+   并检查容器 `TAG:alpha_mode=1`。
+
+---
+
 ## 输出规格
 
 | 项 | 值 |
@@ -262,6 +322,7 @@ MiniMax H3 竖屏换装片（角色 + 衣柜道具 + 绿幕）进游戏前，必
 | 底部大块背景残留 | auto key 不准 → 手动 `--key-rgb` 或 green_dom |
 | 角色服装同色被吃 | 换对比色重拍/重生成；或 `--key-rgb` 精确到实际背景 |
 | 全阶梯 FAIL | 源片主体不完整或 rembg 失败；检查 integrity plate `bbox_h` |
+| 手机上黑底不透明（黑色遮罩），但 `ffprobe` 显示 `yuv420p` | 见上文「分离流」一节。先用 `-c:v libvpx-vp9` 解一帧确认 alpha 是否存在；若存在，检查工具是否丢了 alpha（解码缺 libvpx / 编码没用 `yuva420p`）。**先验文件，再怪渲染** |
 
 ---
 
@@ -269,15 +330,40 @@ MiniMax H3 竖屏换装片（角色 + 衣柜道具 + 绿幕）进游戏前，必
 
 | 文件 | 角色 |
 |------|------|
-| `scripts/chroma_key_lib.py` | 核心库（key / rembg / QA / 编码） |
+| `scripts/chroma_key_lib.py` | 核心库（key / rembg / QA / 编码 / 色相域解析抠像） |
 | `scripts/chroma_key_safe_to_webm.py` | 通用安全 rembg CLI |
 | `scripts/chroma_key_gs_video_webm.py` | 简易 ffmpeg colorkey（默认偏狠，换装慎用） |
 | `scripts/key_pifu04_new_to_webm.py` | pifu04 项目封装 |
 | `scripts/key_huanzhuang_h3_to_webm.py` | 换装 H3 → WebM（soft / green_dom） |
 | `scripts/key_pifu02_new_to_webm.py` | 睡衣安全抠像封装 |
+| `scripts/key_wuziqi_h3_to_webm.py` | 象棋主题皮：H3 渐变绿幕 → `{Stem}_wuziqi.webm` |
 | `.cursor/skills/chroma-key-to-webm/SKILL.md` | Agent Skill |
 
 ---
+
+## 桌面批处理 GUI
+
+项目提供 Windows 下的 Tkinter 操作界面：
+
+```powershell
+python scripts/webm_batch_gui.py
+```
+
+界面支持：
+
+- 输入目录、输出目录、QA 目录选择
+- 批量筛选 `*.mp4`（也可改为 `*.mov` 或其它 ffmpeg 支持的模式）
+- 背景色 `auto / green / blue / magenta`
+- 主体保护优先、覆盖已有文件
+- VP9 无损模式（默认开启）与 CRF 模式
+- 实时显示每个文件的完整性 QA、边缘溢色 QA、WebM Alpha 验证结果
+- 一键打开 `_key_qa/summary.json` 和预览目录
+
+GUI 只是 CLI 的操作外壳，实际处理仍使用 `chroma_key_lib.py` 的保护核心、软抠像、去溢色和 QA 阶梯；因此不会因为界面操作而退化成简单的全局 `colorkey`。
+
+## 画质与透明通道说明
+
+项目目标格式是 `libvpx-vp9 + yuva420p`，这是当前游戏运行时的兼容规范。GUI 默认启用 VP9 lossless，避免 VP9 量化继续损失 RGB 细节；但 `yuva420p` 本身仍有 4:2:0 色度采样，这是透明 WebM 兼容格式的技术限制，并非真正意义上的逐像素 RGB 无损。若必须保留每个 RGB 色度样本，需改用中间 RGBA PNG 序列或支持 `yuva444p` 的完整播放链路，不能保证当前浏览器/游戏运行时兼容。因此本项目优先保证：主体与道具不被误抠、发丝边缘不出现硬锯齿、Alpha 正确、游戏可播放。
 
 ## 清理
 

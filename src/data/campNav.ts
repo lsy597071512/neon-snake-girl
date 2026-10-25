@@ -243,7 +243,7 @@ const NAV_1F: CampRoomNav[] = [
       room_1f_hall2: { x: 40.8, y: 61.6 },
     },
   },
-  /** 负一楼小黑屋：对话瞬移用；不接日常折线 */
+  /** 负一楼库房：对话瞬移用；不接日常折线 */
   {
     roomId: 'room_b1_discipline',
     anchor: { x: 38.2, y: 70.0 },

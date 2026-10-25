@@ -19,6 +19,21 @@ const COMPAT_MODEL_STORAGE = 'rust-belt-ai-compat-model';
 /** 包内 home-gpu-config 版本戳；变化时强制覆盖手机本地旧隧道/模型 */
 const SHIPPED_GPU_CFG_STORAGE = 'rust-belt-ai-shipped-gpu-cfg-id';
 
+/**
+ * 本机 Fable / 家里 GPU 旁路是否编进当前包。
+ *
+ * 市场/正式版默认关闭：只保留「玩家自备 DashScope Key」这一条主路径。
+ * 个人 A/B 调试包用 `VITE_ENABLE_LOCAL_GPU=1` 构建才会重新打开。
+ */
+export const LOCAL_GPU_TEST_ENABLED = (() => {
+  const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env;
+  return env?.VITE_ENABLE_LOCAL_GPU === '1';
+})();
+
+export function isLocalGpuEnabled(): boolean {
+  return LOCAL_GPU_TEST_ENABLED;
+}
+
 /** llama.cpp OpenAI 兼容默认口（本机旁路；Ollama 备胎见 docs/local-ai） */
 export const DEFAULT_COMPAT_BASE_URL = 'http://127.0.0.1:8080/v1/chat/completions';
 
@@ -122,6 +137,9 @@ export function applyHomeGpuConfig(
   cfg: HomeGpuConfig,
   mode: 'localhost' | 'lan' | 'tailscale' | 'cloudflare' | 'remote' = 'localhost',
 ): { ok: true; baseUrl: string; model: string } | { ok: false; reason: string } {
+  if (!LOCAL_GPU_TEST_ENABLED) {
+    return { ok: false, reason: '本版本不含本机模型方案，请用 Qwen Key 对话' };
+  }
   const model = (cfg.model || DEFAULT_LOCAL_MODEL).trim();
   let baseUrl = DEFAULT_COMPAT_BASE_URL;
   if (mode === 'localhost') {
@@ -161,12 +179,25 @@ export function applyHomeGpuConfig(
 export async function forceApplyShippedHomeGpuConfig(): Promise<
   { ok: true; baseUrl: string; model: string; forced: boolean } | { ok: false; reason: string }
 > {
+  if (!LOCAL_GPU_TEST_ENABLED) {
+    return { ok: false, reason: '本版本已移除本机模型方案' };
+  }
   try {
     const res = await fetch(`/home-gpu-config.json?t=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) {
       return { ok: false, reason: '包内无 home-gpu-config.json' };
     }
     const cfg = (await res.json()) as HomeGpuConfig;
+    // The shipped home-GPU manifest is an opt-in test backend. Never let
+    // opening the settings panel or a late fetch overwrite an explicit Qwen choice.
+    if (getChatProvider() !== 'openai_compatible') {
+      return {
+        ok: true,
+        baseUrl: getCompatBaseUrl(),
+        model: getCompatModel(),
+        forced: false,
+      };
+    }
     const shipId = (cfg.shipId || cfg.generatedAt || '').trim();
     let prev = '';
     try {
@@ -217,6 +248,7 @@ export async function forceApplyShippedHomeGpuConfig(): Promise<
 
 /** 本机一键启用 Fable Q4 */
 export function applyLocalHomeGpuPreset(model = DEFAULT_LOCAL_MODEL): void {
+  if (!LOCAL_GPU_TEST_ENABLED) return;
   applyHomeGpuConfig(
     {
       model,
@@ -235,6 +267,9 @@ export function applyLocalVioletPreset(model = DEFAULT_LOCAL_MODEL): void {
 export async function fetchAndApplyHomeGpuConfig(
   mode: 'localhost' | 'lan' | 'tailscale' | 'cloudflare' | 'remote' = 'localhost',
 ): Promise<{ ok: true; baseUrl: string; model: string } | { ok: false; reason: string }> {
+  if (!LOCAL_GPU_TEST_ENABLED) {
+    return { ok: false, reason: '本版本不含本机模型方案' };
+  }
   try {
     const res = await fetch(`/home-gpu-config.json?t=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) {
@@ -295,6 +330,9 @@ function writeStorage(key: string, value: string): void {
 }
 
 export function getChatProvider(): AiChatProviderId {
+  // 市场版：本机模型方案不打包 → 无论本地存过什么，一律走千问主路径
+  if (!LOCAL_GPU_TEST_ENABLED) return 'dashscope';
+
   const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env;
   const fromEnv = env?.VITE_AI_CHAT_PROVIDER?.trim();
   if (fromEnv === 'openai_compatible' || fromEnv === 'dashscope') return fromEnv;
@@ -305,7 +343,29 @@ export function getChatProvider(): AiChatProviderId {
 }
 
 export function setChatProvider(id: AiChatProviderId): void {
+  if (!LOCAL_GPU_TEST_ENABLED) {
+    writeStorage(PROVIDER_STORAGE, 'dashscope');
+    return;
+  }
   writeStorage(PROVIDER_STORAGE, id);
+}
+
+/**
+ * 清掉旧测试包留在本机的「家里云 / Fable」配置。
+ * 老版本曾把 openai_compatible + Tailscale 地址写进 localStorage，
+ * 市场版启动时清一次，避免继续尝试连本机模型而弹失败。
+ */
+export function purgeLocalGpuSettings(): void {
+  if (LOCAL_GPU_TEST_ENABLED) return;
+  try {
+    localStorage.removeItem(PROVIDER_STORAGE);
+    localStorage.removeItem(COMPAT_BASE_STORAGE);
+    localStorage.removeItem(COMPAT_KEY_STORAGE);
+    localStorage.removeItem(COMPAT_MODEL_STORAGE);
+    localStorage.removeItem(SHIPPED_GPU_CFG_STORAGE);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function getCompatBaseUrl(): string {

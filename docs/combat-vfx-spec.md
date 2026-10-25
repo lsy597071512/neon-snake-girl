@@ -128,47 +128,27 @@ spawnLightPillar(x, y, z, color, height = 4, life = 0.4) // 上升光柱
 
 ---
 
-## 五、技能形状语言（`combatSkillFx.ts`）
+## 五、技能特效触发（`Combat3D.ts`）
 
-每个 `SkillFxDef` 现在携带完整视觉信息：
+> **2026-10-08 变更**：先恢复 UR「光轮裁决」的 Boss 目标技能表现。它采用 1 个低面数 3D 几何壳（裁决柱 / 顶部十字 / 落地环）+ 3 个池化 2D 反馈（闪电 / 环波 / 火花），在 Boss 命中时触发，冷却 4.5 秒；其余技能仍保持轻量被动链路不变。可通过 `/stellar-skill-preview.html` 单独测试。移动 low 档不使用后处理 Bloom，技能几何不加载外部资源。
+>
+> **2026-09-19 变更**：角色主动技能测试链路已整体删除——`combatSkillFx.ts` 中的 `SkillFxDef` / `SKILL_FX` 表 / `getSquadSkillFxList`、`SkillSprite3D.ts`、以及 `Combat3D` 内的耐力蓄能（`skillStamina`）、头顶蓄力圈（`ChargeRing`）、点击释放（`tryFireReadySkill`）、入场宣告（`announceSkills`）、周期脉冲（`updateSkillPulses` / `firePulseSkill`）全部移除。`combatSkillFx.ts` 现仅保留编队/弹幕名工具函数（`getShotLabel` / `formationOffsetX` / `formationScaleMul`）。
+>
+> 当前生效的技能特效只有 **3 个被动即时触发技能**，无蓄能、无手动释放、无周期脉冲、无入场宣告。
 
-```ts
-{
-  id: CharacterSkillId;
-  name: string;          // 旧字段
-  color: string;         // 主色（环波/spark 主源）
-  accentColor: string;   // 副色（叠层环波/中心高亮）
-  pulseInterval: number; // 周期光环触发间隔（0=无周期）
-  pulseLabel: string;    // 状态栏文字
-  bannerTitle: string;   // 横幅标题（真实可见，旧实现为空）
-  bannerDetail: string;  // 横幅详情
-  shapeKind: SkillShape; // 'frost' | 'spark' | 'pierce' | 'rain' | 'shield' | 'judgment' | 'pulse'
-  bannerColor: string;   // 横幅配色（CSS 变量）
-}
-```
+### 5.1 生效技能速查
 
-### 5.1 7 个技能形状速查
+| 技能 | 主色 | 触发时机 | 视觉/反馈 |
+|------|------|---------|-----------|
+| 翠翼连闪 `resonance_burst` | `#7CFF4A` | 连击达成 3 杀，`fire()` 内同步触发 | `vfx.spawnSkillEffect` + `skillFx3D.spawn` + 横幅 + SFX |
+| 绯尾贯穿 `sand_pierce` | `#ff5e8a` | 弹幕穿透判定通过时同步触发 | 横幅 + SFX |
+| 锻渣雨幕 `iron_rain` | `#ff8840` | 每 10s 周期触发 `triggerIronRain()` | 横幅 + SFX + `skillFx3D.spawn`（锚定敌人，跟随至 maxLife 结束）|
 
-| 技能 ID | 中文名 | shape | 主色 | 关键元素 |
-|---------|--------|-------|------|---------|
-| `frost_overload` | 夜爪撕裂 | `frost` | `#5ee7ff` | 主爆发 + 护盾脉冲 + 6 冰晶 + 双环波 |
-| `resonance_burst` | 翠翼连闪 | `spark` | `#7CFF4A` | 三发 muzzle + 主爆发 + 弧线尾焰 + 上升光柱 |
-| `sand_pierce` | 绯尾贯穿 | `pierce` | `#ff5e8a` | 双段 pierce trail + 主爆发 + 5 火花 + 双环波 |
-| `iron_rain` | 锻渣雨幕 | `rain` | `#ff8840` | 主爆发 + 4 碎片 + 双环波 + 落地光柱（含环波/火花）|
-| `shard_shell` | 冰华护壳 | `shield` | `#b8e0ff` | 护盾脉冲 + 主爆发 + 8 冰晶 + 蓝白光柱 |
-| `stellar_judgment` | 光轮裁决 | `judgment` | `#ffd54f` | 主爆发 + 铁雨柱（含环波/火花）+ 6 单位闪电 + 双环波 + **重型击杀** |
-| `outer_pulse` | 兔械同调 | `pulse` | `#ff9a4a` | 护盾脉冲 + 主爆发 + 暖光柱 + 4 火花 |
+### 5.2 共用反馈 API（保留）
 
-> 角色 → 技能的映射在 `src/data/characters.ts`（每条 `skillId` 字段），修改技能形状不需要改角色数据。
+`showSkillBanner` / `playSkillSfx` / `VfxPool.spawnSkillEffect` / `SkillFx3D.spawn` 为上述被动技能共用的反馈通道，**不属于已删除的主动技能链路**，新增被动技能时直接复用，不要再引入蓄能/点击释放机制。
 
-### 5.2 何时触发
-
-- **入场宣告**（`announceSkills`）：开局延迟 0/420/840ms 播放入场特效 + 横幅 + SFX。
-- **周期脉冲**（`updateSkillPulses`）：`pulseInterval > 0` 的技能（夜爪撕裂 / 冰华护壳 / 光轮裁决 / 兔械同调）每隔 N 秒再触发一次。脉冲同时调用 `showSkillBanner` + `playSkillSfx`。
-- **即时触发**（命中/击杀/开火过程中）：
-  - 翠翼连闪：连击达成 3 杀时，`fire()` 内同步触发
-  - 绯尾贯穿：弹幕穿透判定通过时同步触发
-  - 锻渣雨幕：每 10s 周期触发 `triggerIronRain()`
+> 角色 → 技能的映射在 `src/data/characters.ts`（每条 `skillId` 字段）。
 
 ---
 
@@ -191,7 +171,6 @@ spawnLightPillar(x, y, z, color, height = 4, life = 0.4) // 上升光柱
 | Boss/暴击命中 | spawnHit + 金环 + 白环 + 4 红火花 + 击退 0.04~0.06 | 0.16 / 0.35 / 0.32 | 0.04~0.07 | `playHitSfx(true)` |
 | 普通击杀 | spawnKillBurst（含环波 + 碎片自动叠层）| 0.14 / 0.2 / 0.18 | 0.02 | `playKillSfx(false)` |
 | Boss 击杀 | spawnHeavyKillBurst（金色双环 + 6 碎片 + 4 白火花）| 0.32 / 0.7 / 0.6 | 0.08 | `playKillSfx(true)` + `triggerCritFlash()` |
-| 光轮裁决 | 双环波 + 闪电 + 铁雨（自带环波/火花）| 0.2 / 0.45 / 0.45 | 0.05 | `playSkillSfx('stellar_judgment')` + 全屏白光 |
 | 锻渣雨幕 | 主爆发 + 4 碎片 + 多列铁雨 | 0.18 / 0.35 / 0.25 | 0.03 | `playSkillSfx('iron_rain')` |
 | 受击（无护盾）| 角色闪红 + 红色 vignette | — | — | `playHurtSfx()` + `triggerVignette()` |
 | 受击（护盾抵消）| 护盾脉冲 | — | — | `playShieldSfx()` |
@@ -233,21 +212,11 @@ CSS 动画统一 1.4s 入场 + 240ms vignette / 1.4s banner；`is-show` 移除�
 | `playKillSfx(boss?)` | 击杀 | 普通 360Hz / Boss 180Hz sawtooth + 噪声尾音 |
 | `playShieldSfx()` | 护盾抵消 | 660Hz sine ping + 1320Hz 二次谐波 |
 | `playHurtSfx()` | 我方受击 | 220Hz sawtooth 颤抖 + 低频白噪 |
-| `playSkillSfx(skillId)` | 7 个技能独立音色 | 见下表 |
+| `playSkillSfx(skillId)` | 技能触发 | 统一打击音（参数仅作类型标记，不再按技能分音色） |
 
-### 7.3 技能音色表
+> **2026-09-19 变更**：原 7 技能独立音色表（夜爪撕裂/翠翼连闪/绯尾贯穿/锻渣雨幕/冰华护壳/光轮裁决/兔械同调）随主动技能链路一并废弃，`playSkillSfx` 现为统一打击音 `playUnifiedHitSfx()`。当前仅翠翼连闪 / 绯尾贯穿 / 锻渣雨幕三个被动技能调用它。
 
-| 技能 ID | 关键音色 |
-|---------|---------|
-| `frost_overload` | 220Hz sine 0.4s + 880Hz reveal |
-| `resonance_burst` | 880Hz square + 1760Hz 双谐 |
-| `sand_pierce` | 1200Hz sawtooth 短促 + 240Hz 低 tail |
-| `iron_rain` | 140Hz sawtooth 0.32s + 噪声 |
-| `shard_shell` | 620Hz sine + 1240Hz 双谐 |
-| `stellar_judgment` | 330Hz sawtooth 上升 + 90Hz sub + 1320Hz 雷击 + 5400Hz→600Hz 噪声 |
-| `outer_pulse` | 440Hz triangle + 880Hz 双谐 |
-
-### 7.4 兼容性
+### 7.3 兼容性
 
 - 旧 WebView（无 WebAudio）：`getCtx()` 返回 null，所有 `play*` 静默 no-op；不抛错。
 - 静音设备：用户系统级静音后，所有声音自动不再输出（AudioContext 仍在跑但不连接 destination 之外的扬声器）。
@@ -298,7 +267,6 @@ Heavy Kill Burst                  = 14 sprite
 3. **移动端 low 端** `maxPixelRatio = 1.5` + 关闭 Bloom + 关闭 ambientDust（已设）三者配合本规范的 sprite 池上限，移动端 60fps 仍然可达。
 4. **若 future 检测到 mobile-low 掉帧**，本规范预留以下降级路径（**未启用**）：
    - `spawnHeavyKillBurst` 减成 `spawnShards(count = 4)` 和 `spawnImpactSparks(count = 4)`
-   - 光轮裁决的 6 道闪电减到 3 道
    - 翠翼连闪三发 muzzle 减成 2 发
    触发条件：`avgFrameMs > 18ms` 持续 3 秒，写入 `localStorage.ns.combatQualityOverride`。
 
@@ -429,3 +397,42 @@ combat.fovPulse      // 同上
 ```
 
 `VfxPool.spawnSkillFxLegacy` 是 `spawnSkillEffect` 的别名，仅供历史调用兼容。
+
+---
+
+## 附录 C：2026-10 落地修订（v2，2x 标准 + 模型层 + 池治理）
+
+### C.1 两套表现语言，禁止混用
+- **释放端**（谁发的）：`casterBurstFx`——释放者脚下双环 + 光晕 6 + 光柱 7 + 6 火花 + 技能名飘字；13 技能开头必调，配色=技能主色/亮色
+- **受击端**（打中谁）：`skillImpactFx`——光晕 8（0.84）+ 环 5（1.0）+ 柱 10（0.8）+ 8 火花；高频落点可缩 0.7；打 Boss ×1.5~1.8
+- **被动小规格**：爆点 ≤0.7、线 ≤0.3、无十字、震屏减半，横幅写"被动触发"；**手动大规格**：爆点 ≥1.0、十字/穹顶/护罩、施法者标记
+
+### C.2 SkillFx3D 模型层（真 3D，`AdditiveBlending`，自动回收）
+| 方法 | 用途 | 关键参数 |
+|------|------|----------|
+| `spawnBladeSweep` | 破风 8×0.8 米细刃，34 米/秒劈 3 秒 | `vel` 位移，`maxOpacity` 0.6 |
+| `spawnSlashLine` | 连斩/连闪/贯穿牵引线（枪口→目标不断） | 宽 0.3~0.6，命 0.3~0.6 秒 |
+| `spawnCannonShell` | 熔城 1.4 倍火球，速度=距离÷0.6 秒 | 落点帧=爆炸帧 |
+| `spawnWeaveDome` | 织网三层金环穹顶（0.75 缩放） | 半径 2.2/3.3/4.4 |
+| `spawnAegisDome` | 庇护跟随半球护罩（`follow` 逐帧读位置） | 6 秒与减伤等长 |
+| `spawnShardRing` | 静域 8 锥冰刺环 | 半径 3.5 |
+| `spawnRainSpike` | 被动雨幕熔渣尖刺（`vel.y=-22` 下坠） | 落点=结算帧 |
+| 审判壳（旧） | 终审跟随，`maxOpacity` 0.7 | 1.44 倍体型 |
+
+`ActiveShell` 新增 `vel`（直线位移）与 `maxOpacity`（分档防爆闪：默认 0.42，裁决 0.7，刃/线 0.6~0.85）。
+
+### C.3 敵方受击三件套（`Entity3D`）
+- `knockbackV`（指数衰减位移，钳位 `SPAWN_Z-15`）+ `topple`（0~1.2，模型后旋 -0.55 弧度，实例/独立/贴图三路各有实现，0.55 秒回正）
+- **状态环**（定身金/冰冻蓝/灼烧橙，圆环 3.9 米 + 5.5 米光柱 + 呼吸缩放）：**必须挂 `scene` 逐帧同步坐标**，禁止挂 `e.root`（实例化敌人 root 不在场景图，见教训 C.5-2）；死亡/消失摘环销毁；`removeEnemy` 首行清环
+- 灼烧 `burnDps/burnUntilMs` 0.5 秒一跳 + 橙火花；冰爆连锁 `noShatter` 限 1 层
+
+### C.4 池治理（`VfxPool.acquire`）
+- `SKILL_RESERVE = 12`：普通火花到 28 格即停，后 12 格只给关键（`critical=true`）技能用
+- 满池顶替改"顶最新"（子弹火花）不顶"最早"（技能主体）
+- 子弹命中火花 13 粒/次 → 7 粒/次；关键落点/穿刺/尾迹一律 `critical`
+
+### C.5 铁律（违反必出线上事故）
+1. 伤害结算时机 = 特效落点帧（逻辑体与模型同速同命，`hitIds` 防重）
+2. 自带冷却守卫的函数，调用方不得提前写 CD（终审事件）
+3. 受击端尺寸：小怪 1.0，Boss ×1.5~1.8（83 米距离补偿）
+4. 只加表现、不改数值：任何 `mult`/CD/区间改动必须同步改 `active-skills-spec.md` §二并重算 §一占比

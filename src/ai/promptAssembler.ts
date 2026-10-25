@@ -7,9 +7,42 @@ import {
   isDisciplineEnabled,
 } from './disciplineSession';
 import { buildAdultEventPromptBlock, detectAdultEventContext } from './adultEvents';
+import { CAMP_ROOM_MAP } from '../data/campLayout';
+import {
+  BATH_ASSIST_PROTOCOL,
+  BATH_CO_CLIP_PROTOCOL,
+  canShowBathButtons,
+  isBathAssistActiveFor,
+} from './bathAssistSession';
+import {
+  DANCE_PROTOCOL,
+  buildDanceActivePromptBlock,
+  buildDanceJustLeftPromptBlock,
+  buildPlayerDanceAskPromptBlock,
+  canShowDanceButtons,
+  isDanceActiveFor,
+} from './danceSession';
+import {
+  ANFU_PROTOCOL,
+  buildAnfuActivePromptBlock,
+  buildAnfuJustLeftPromptBlock,
+  buildPlayerAnfuAskPromptBlock,
+  canShowAnfuButtons,
+  isAnfuActiveFor,
+} from './anfuSession';
+import {
+  MINIGAME_PROTOCOL,
+  buildMiniGameActivePromptBlock,
+  buildMiniGameJustLeftPromptBlock,
+  buildMiniGameStakePromptBlock,
+  buildPlayerMiniGameAskPromptBlock,
+  canShowMiniGameButtons,
+  isMiniGameActiveFor,
+} from './miniGameSession';
 import {
   BATH_INTIMATE_CONSENT_PROTOCOL,
   buildCommanderBondPromptBlock,
+  buildIntimacyUnlockPromptBlock,
   getAiProfile,
   getVoicePromptLine,
 } from './aiProfiles';
@@ -61,6 +94,7 @@ import { buildRelationshipArcPromptBlock } from './relationshipArc';
 import { buildStructuredFactsPromptBlock } from './structuredFacts';
 import { buildAffinityGameplayPromptHint } from '../systems/AffinityGameplay';
 import { describeMoodContinuumForPrompt } from './moodContinuum';
+import { describeActivityFatigueForPrompt } from './activityFatigue';
 import { getSceneCard, sceneCardToPromptBlock } from './sceneCards';
 import { formatGameClock, describeTimeScale } from './worldClock';
 import {
@@ -72,7 +106,9 @@ import {
 import type { AiLivingSave, CharacterActivity, DialogueRequest } from './types';
 import type { ChatMessage } from './llmClient';
 import type { SaveData } from '../types';
-import { describeSleepForPrompt, isDeepSleeping, isInSleepSystem } from './sleepSystem';
+import { describeSleepForPrompt, isDeepSleeping, isInSleepSystem, sleepWakeDifficulty } from './sleepSystem';
+import { isTraveling } from './travel';
+import { buildOfflineDigestPromptBlock } from './offlineSummary';
 import { CHARACTER_MAP } from '../data/characters';
 
 function agendaDesireHint(living: AiLivingSave, characterId: string): string {
@@ -106,7 +142,7 @@ export type AssembledDialogue = {
   system: string;
   /** L0–L2 固定人设/玩法宪法（会话内可缓存拼装） */
   systemStatic: string;
-  /** L3–L4 本轮世界快照（含场景门控块、成人事件等；并入 system，不进 user） */
+  /** L3–L4 本轮世界快照（含场景门控块等；并入 system，不进 user） */
   systemDynamic: string;
   history: ChatMessage[];
   user: string;
@@ -293,9 +329,11 @@ ${buildOutfitChangePromptBlock(living, req.characterId)}
 ${save ? emotionOutfitPromptHint(save, living, req.characterId) : ''}
 ${emotionPosePromptHint(req.characterId)}
 与指挥官感情温度：好感 ${affinity}/100（${describeAffinity(affinity)}）
+${buildIntimacyUnlockPromptBlock(affinity)}
 ${buildRelationshipArcPromptBlock(living, req.characterId)}
 ${buildStructuredFactsPromptBlock(living, req.characterId)}
 ${describeMoodContinuumForPrompt(living, req.characterId)}
+${describeActivityFatigueForPrompt(living, req.characterId)}
 ${buildAffinityGameplayPromptHint(living, req.characterId)}
 ${unfinished.length ? `未了之事（可自然带一句，勿清单播报）：\n${unfinished.join('\n')}` : '未了之事：暂无特别沉重的挂念。'}
 ${describeLifeGoalForPrompt(living, req.characterId)}`;
@@ -303,13 +341,41 @@ ${describeLifeGoalForPrompt(living, req.characterId)}`;
   const nowSnap = captureDialogueSceneSnapshot(living, req.characterId);
   const prevSnap = getDialogueSceneSnapshot(living, req.characterId);
   const sceneTransition = buildSceneTransitionPromptBlock(prevSnap, nowSnap);
+  const LYING_ACTIVITIES: string[] = ['sleeping', 'rest'];
+  const postureTransition = (() => {
+    const wasLying = !!prevSnap && LYING_ACTIVITIES.includes(prevSnap.activity);
+    const nowLying = LYING_ACTIVITIES.includes(nowSnap.activity);
+    if (wasLying && !nowLying) {
+      return '【姿态过渡·已起身】上一幕你还躺着/窝着；本轮要先写起身、掀被、坐起、站定之类的动作，再继续说话。禁止躺着却描写走动。';
+    }
+    if (!wasLying && nowLying) {
+      return '【姿态过渡·已卧下】你刚从站着变成躺/靠下；本轮先写坐下、躺下、拉被之类的动作，再继续说话。';
+    }
+    return '';
+  })();
+  const travelLine = isTraveling(living, req.characterId)
+    ? '【正在赶路】你此刻在走路（去别处），玩家眼前是你当前所在处（出发房间/楼梯/大厅，随脚步实时切换）；可以写脚步/推门/路上所见，禁止声称已经到了目的地或已经在做目的地的事。'
+    : '';
+  const agendaForNow = getAgenda(living, req.characterId);
+  const intentVsNow =
+    isAgendaActive(agendaForNow) &&
+    agendaForNow?.targetRoomId &&
+    agendaForNow.targetRoomId !== presence.roomId
+      ? `【意图≠现状】你的计划是「${agendaForNow.reason}」，之后去${CAMP_ROOM_MAP[agendaForNow.targetRoomId]?.label ?? agendaForNow.targetRoomId}——尚未发生。此刻你在${CAMP_ROOM_MAP[presence.roomId]?.label ?? presence.roomId}（${presence.behavior}）。禁止把计划说成"我正在/我已经在"，也不要把计划目标的行为当成本轮现场。`
+      : '';
+  const antiRepeatLine =
+    '【禁止复读】最近两轮已经说过的句子、理由、追问不得原样重复；玩家已回应/已确认的事必须推进（执行或换话题），不能换个说法再问一遍。';
+  const reasonConsistencyLine =
+    '【理由自洽】拒绝/犹豫的理由必须与当前地点和情境自洽：人在室内、睡衣、深夜时，不要拿"外面风大/风向不对"当主要理由（除非你正打算出门）；同一理由不要反复说。';
   const locChallenge = buildLocationChallengePromptBlock(living, req);
   const bathDemote = buildBathAgendaDemotePromptBlock(living, req.characterId);
 
   // 动态 contextParts：不含 staticPrefix 已有的羁绊全文 / 地标 / 深场权威定义
   const contextParts = [
-    '【世界快照】以下为本轮可变状态；不得覆盖人设【专属声线】与玩法宪法（换装/嘴腿/JSON/成人底线）。',
+    '【世界快照】以下为本轮可变状态；不得覆盖人设【专属声线】与玩法宪法（换装/嘴腿/JSON/表达底线）。',
+    '【活人定律·第一宗旨】你是真实生活在这座营地里的人，不是随叫随到的开关：可以拒绝、会困累饿/羞/有脾气；换衣必须先换、做事要花时间、人在一处不能同时在另一处；被打扰、被放鸽子、被叫醒又扔下都会有代价；你只知道世界里发生的事，指挥官离线空档＝他不在场（离开或睡觉）。',
     buildCommanderCanonPromptBlock(),
+    buildOfflineDigestPromptBlock(living),
     buildCommanderOnlinePresenceLine(living, req.characterId),
     liveSnap ? liveCharacterSnapshotToPromptBlock(liveSnap) : '',
     `【你在营地的位置】\n${buildCharacterCampPromptLines(req.characterId, roomId, presence.behavior)}`,
@@ -318,6 +384,11 @@ ${describeLifeGoalForPrompt(living, req.characterId)}`;
     `【此刻状态】${formatGameClock(living)}（${describeTimeScale()}）；你正在：${presence.behavior}（${activityInChinese(presence.activity)}）。`,
     buildSceneRealtimeRuleLine(),
     sceneTransition,
+    postureTransition,
+    travelLine,
+    intentVsNow,
+    antiRepeatLine,
+    reasonConsistencyLine,
     locChallenge,
     bathDemote,
     `【当前意图·勿顶替回答】${describeAgendaForPrompt(living, req.characterId)}`,
@@ -343,14 +414,18 @@ ${describeLifeGoalForPrompt(living, req.characterId)}`;
 
   contextParts.push(describeSleepForPrompt(living, req.characterId));
   if (isDeepSleeping(living, req.characterId)) {
+    const diff = sleepWakeDifficulty(living, req.characterId);
     contextParts.push(
-      '【睡眠立绘】你已完全入睡：玩家眼前是星夜睡衣睡眠循环动态（侧躺/蜷缩轻呼吸）。' +
-        '被找聊天=被打扰状态，你会气愤或疲惫；interrupt_reaction 自行判定。' +
-        '若你决定醒来（做梦惊醒/被吵醒/不想再睡），对白里体现醒来；系统会把立绘同步回睡衣站立，勿声称立刻换回装甲。',
+      '【睡眠立绘】你已入睡：玩家眼前是星夜睡衣睡眠循环动态（侧躺/蜷缩轻呼吸）。' +
+        `唤醒难度：${diff.note}。` +
+        (diff.wakeable
+          ? '被找聊天/被邀请时你可以选择醒来（迷糊或带起床气），也可以只翻身继续睡；醒来＝离开睡眠流程，立绘回睡衣站立，之后可以换装或去做别的事。'
+          : '本轮你睡得太沉：只能梦呓/翻身，不得起身、不得答应任何活动（跳舞/安抚/换装等），interrupt_reaction 也按「没听见」处理。') +
+        '不要声称立刻换回装甲。',
     );
   } else if (isInSleepSystem(living, req.characterId)) {
     contextParts.push(
-      '【睡眠立绘】你在准备入睡：已穿星夜睡衣站立（idle），尚未切到睡眠循环。',
+      '【睡眠立绘】你在准备入睡：已穿星夜睡衣站立（idle），尚未切到睡眠循环；玩家找你说话时你可以选择不睡了陪他，或说「我要睡了」。',
     );
   }
 
@@ -361,27 +436,84 @@ ${describeLifeGoalForPrompt(living, req.characterId)}`;
     contextParts.push(
       `【洗浴立绘】你在浴室。玩家眼前默认是冲澡待机动态（白浴巾裹身、轻呼吸/微摆）。` +
         (intimateOn
-          ? `此刻浴巾已脱掉，立绘是成人冲澡动态——对白必须按「已脱巾」说；想重新裹上填 bath_intimate_consent=false。禁止再说裹着浴巾。`
-          : `只有你自愿脱掉浴巾，或指挥官明确要求脱巾且你同意时，才填 bath_intimate_consent=true。一起洗/搓背但仍裹巾 → 填 "" 或 false。对白若说「裹着浴巾」绝不可填 true。`),
+          ? `此刻浴巾已解下，立绘是解巾后的冲澡动态——对白按「已解巾」说；想重新裹上填 bath_intimate_consent=false。`
+          : `只有你自愿解巾，或指挥官温柔请求且你同意时，才填 bath_intimate_consent=true。一起洗/搓背但仍裹巾 → 填 "" 或 false。对白若说「裹着浴巾」绝不可填 true。`),
     );
   }
 
-  // 小黑屋：进房沉浸块优先；刚离开次之；未进房的对话威慑再次之
-  if (isDisciplineActiveFor(living, req.characterId)) {
-    contextParts.push(buildDisciplineActivePromptBlock(living, req.characterId));
+  // 浴室互动协议：指挥官在聊天里提「帮我冲澡 / 一同泡澡」时必须能应答
+  if (canShowBathButtons(living, req.characterId)) {
+    contextParts.push(BATH_ASSIST_PROTOCOL);
+  }
+  if (isBathAssistActiveFor(living, req.characterId)) {
+    contextParts.push(BATH_CO_CLIP_PROTOCOL);
+  }
+
+  // 舞蹈事件：进行中优先；刚结束次之；有资源的角色始终注入协议（保证按钮/打字/语音都能触发）
+  if (isDanceActiveFor(living, req.characterId)) {
+    contextParts.push(buildDanceActivePromptBlock(living, req.characterId));
   } else {
-    const justLeft = buildDisciplineJustLeftPromptBlock(living, req.characterId);
-    if (justLeft) contextParts.push(justLeft);
-    else if (
-      (!save || isDisciplineEnabled(save)) &&
-      req.turnMode === 'reply' &&
-      detectDisciplineThreat(req.playerMessage)
-    ) {
-      contextParts.push(buildDisciplineThreatPromptBlock());
+    const danceLeft = buildDanceJustLeftPromptBlock(living, req.characterId);
+    if (danceLeft) contextParts.push(danceLeft);
+  }
+  const danceAsk = buildPlayerDanceAskPromptBlock(living, req.characterId);
+  if (danceAsk) contextParts.push(danceAsk);
+  if (canShowDanceButtons(living, req.characterId)) {
+    contextParts.push(DANCE_PROTOCOL);
+  }
+
+  // 安抚室事件：进行中优先；刚结束次之；有资源且今日未玩的角色注入协议
+  if (isAnfuActiveFor(living, req.characterId)) {
+    contextParts.push(buildAnfuActivePromptBlock(living, req.characterId));
+  } else {
+    const anfuLeft = buildAnfuJustLeftPromptBlock(living, req.characterId);
+    if (anfuLeft) contextParts.push(anfuLeft);
+  }
+  const anfuAsk = buildPlayerAnfuAskPromptBlock(living, req.characterId);
+  if (anfuAsk) contextParts.push(anfuAsk);
+  if (canShowAnfuButtons(living, req.characterId)) {
+    contextParts.push(ANFU_PROTOCOL);
+  }
+
+  // 小游戏事件（五子棋/猜拳）：进行中优先；刚结束次之；赛后 stake 窗再次；按钮可用注入协议
+  if (isMiniGameActiveFor(living, req.characterId)) {
+    contextParts.push(buildMiniGameActivePromptBlock(living, req.characterId));
+  } else {
+    const miniGameLeft = buildMiniGameJustLeftPromptBlock(living, req.characterId);
+    if (miniGameLeft) contextParts.push(miniGameLeft);
+    const stake = buildMiniGameStakePromptBlock(living, req.characterId);
+    if (stake) contextParts.push(stake);
+  }
+  const miniGameAsk = buildPlayerMiniGameAskPromptBlock(living, req.characterId);
+  if (miniGameAsk) contextParts.push(miniGameAsk);
+  if (canShowMiniGameButtons(living, req.characterId)) {
+    contextParts.push(MINIGAME_PROTOCOL);
+  }
+
+  // 现实互斥：一个人不可能同时做两件事。任何独占事件进行中，其它活动必须婉拒。
+  {
+    const busy: string[] = [];
+    if (isBathAssistActiveFor(living, req.characterId)) busy.push('浴室互动（冲澡/帮洗/共浴）');
+    if (isAnfuActiveFor(living, req.characterId)) busy.push('安抚室玩棉花游戏');
+    if (isDisciplineActiveFor(living, req.characterId)) busy.push('调教事件');
+    if (isDanceActiveFor(living, req.characterId)) busy.push('舞蹈事件（大厅）');
+    if (isMiniGameActiveFor(living, req.characterId)) busy.push('小游戏对局（五子棋/猜拳）');
+    if (busy.length) {
+      contextParts.push(
+        `【现实互斥·硬规则】你此刻正在「${busy.join('／')}」。人不可能同时做两件事：` +
+          '指挥官若提出另一种场馆活动（一起跳舞、去安抚室、一起冲澡、去某处做别的事），' +
+          '必须按现实婉拒——说明「等这边结束/现在离不开」，并给出之后再做的方式；' +
+          '不得答应，不得描写自己已经在别的房间、已经换好别的衣服、或正在做第二件事。' +
+          '这些事件结束后才可以开始下一件；系统不会把你从当前事件里拉走。',
+      );
+    } else {
+      contextParts.push(
+        '【现实互斥】同一时间只能进行一件事：冲澡/浴室互动、安抚室、调教、舞蹈、小游戏互不并行；其它事件进行中时不要答应新的场馆活动。',
+      );
     }
   }
 
-  // 成人事件总层：浴室亲密 + 小黑屋 + 成人话题；挂载身体敏感点
+  // 亲密氛围总层：浴室 + 话题；挂载亲近区
   {
     const adultCtx = detectAdultEventContext({
       living,
@@ -547,36 +679,19 @@ ${describeLifeGoalForPrompt(living, req.characterId)}`;
   if (turnMode === 'outfit_reveal') {
     user = buildOutfitLiveUserDirective(living, req.characterId, 'outfit_reveal');
   } else if (turnMode === 'proactive') {
-    const discActive = isDisciplineActiveFor(living, req.characterId);
-    const justLeft = buildDisciplineJustLeftPromptBlock(living, req.characterId);
-    user = discActive
-      ? `【系统·小黑屋内发言】动机：${req.playerMessage || '束缚中的反应'}。
-你已被拖入调教室并束缚，无法离开。按动机与性格开口；禁止假装未进房；禁止 end_conversation=true。
-${buildOutfitLiveUserDirective(living, req.characterId, turnMode)}`
-      : justLeft
-        ? `【系统·刚离开小黑屋】动机：${req.playerMessage || '束缚已解除'}。
-你已离开小黑屋、束缚已解除。按动机开口；禁止再说被绑着；action 禁止写束缚。
-${buildOutfitLiveUserDirective(living, req.characterId, turnMode)}`
-      : `【系统·角色主动发言】指挥官这会儿没说话。动机：${req.playerMessage || '冷场想接话'}。
+    user = `【系统·角色主动发言】指挥官这会儿没说话。动机：${req.playerMessage || '冷场想接话'}。
 请你按性格与环境自行开口（可催促、自言自语、换话题、吐槽沉默、或短促确认对方还在）。
 禁止复读上一句；禁止假装指挥官刚说了什么。本轮不要编造指挥官台词。
 若不想再聊可 end_conversation=true；若还想接着说可 want_continue=true。
 ${buildOutfitLiveUserDirective(living, req.characterId, turnMode)}`;
   } else if (turnMode === 'continue') {
-    const discActive = isDisciplineActiveFor(living, req.characterId);
-    const justLeft = buildDisciplineJustLeftPromptBlock(living, req.characterId);
     user = `【系统·角色接着说】你上一句还没把话说完/还想补一句。动机：${req.playerMessage || '接着刚才的话'}。
 直接续上，不要重新寒暄，不要复读上一句。指挥官仍可能随时插话。
 说完该停了就 want_continue=false；还想再补一句才 want_continue=true。
-${discActive ? '【束缚锁定】你仍在小黑屋，end_conversation 必须 false。\n' : ''}${justLeft ? '【刚离开】束缚已解除，禁止再说被绑着。\n' : ''}${buildOutfitLiveUserDirective(living, req.characterId, turnMode)}`;
+${buildOutfitLiveUserDirective(living, req.characterId, turnMode)}`;
   } else {
-    const discLock = isDisciplineActiveFor(living, req.characterId)
-      ? '\n【束缚锁定】你已在小黑屋被固定：end_conversation 必须 false；禁止假装未进房或逃走。'
-      : buildDisciplineJustLeftPromptBlock(living, req.characterId)
-        ? '\n【刚离开锁定】束缚已解除、已离开小黑屋：禁止再说被绑着/挣扎挣脱。'
-        : '';
     // 千问与 Fable 同一 user 形态：回答锁 + 原话 + 换装指令（世界状态在 system）
-    user = `${buildPlayerTurnPriorityLock(req.playerMessage)}\n\n指挥官说：${req.playerMessage}\n\n${buildOutfitLiveUserDirective(living, req.characterId, turnMode)}${discLock}`;
+    user = `${buildPlayerTurnPriorityLock(req.playerMessage)}\n\n指挥官说：${req.playerMessage}\n\n${buildOutfitLiveUserDirective(living, req.characterId, turnMode)}`;
   }
 
   return { system, systemStatic, systemDynamic, history, user };

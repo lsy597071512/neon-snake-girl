@@ -21,6 +21,12 @@ export function isStoryGuideDone(save: SaveData): boolean {
   return Boolean(save.tutorialFlags.storyGuideDone);
 }
 
+/**
+ * 教学最后一关（第 3 关）。引导期间玩家必然会打到这里，
+ * 所以「进度是否超过教学」是判断老存档、决定要不要跳过引导的唯一依据。
+ */
+export const TUTORIAL_LAST_STAGE_ID = 3;
+
 export function isCampLockedByStory(save: SaveData): boolean {
   return !isStoryGuideDone(save);
 }
@@ -105,6 +111,17 @@ function hasFreeWeaponForHeartforge(save: SaveData): boolean {
   return false;
 }
 
+/**
+ * 背包里是否还有能装给指定角色的武器副本（排除他人在用的）。
+ * g_equip 的防卡死依据：连一把都装不上时本步无法完成，必须放行而不是让玩家干等。
+ */
+function hasFreeWeaponFor(save: SaveData, characterId: string): boolean {
+  for (const w of WEAPONS) {
+    if (countAvailableWeaponCopies(save, w.id, characterId) > 0) return true;
+  }
+  return false;
+}
+
 /** 某步完成条件（幂等） */
 export function isGuideStepConditionMet(save: SaveData, stepId: GuideStepId): boolean {
   switch (stepId) {
@@ -122,7 +139,9 @@ export function isGuideStepConditionMet(save: SaveData, stepId: GuideStepId): bo
     case 'g_shop':
       return Boolean(save.tutorialFlags.storyGuideArmoryOpened) || hasFreeWeaponForHeartforge(save);
     case 'g_equip':
-      return heartforgeArmed(save);
+      // 防卡死：背包里一把能装给芹奈的都没有时，本步永远无法完成，
+      // 直接判定通过让引导继续，绝不能让玩家对着空菜单死等。
+      return heartforgeArmed(save) || !hasFreeWeaponFor(save, 'heartforge');
     case 'g_squad2':
       return save.squad[0] === 'ashcrow' && save.squad[1] === 'heartforge';
     case 'g_stage2':
@@ -162,7 +181,7 @@ export function syncGuideProgress(save: SaveData): void {
   }
 }
 
-export function advanceGuideConfirm(save: SaveData): { ok: boolean; gotoMap?: boolean; done?: boolean } {
+export function advanceGuideConfirm(save: SaveData): { ok: boolean; gotoMap?: boolean; gotoSquad?: boolean; done?: boolean } {
   syncGuideProgress(save);
   const id = getGuideStepId(save);
   if (!id) return { ok: false };
@@ -181,7 +200,7 @@ export function advanceGuideConfirm(save: SaveData): { ok: boolean; gotoMap?: bo
   }
   save.tutorialFlags.storyGuideStep = n;
   syncGuideProgress(save);
-  return { ok: true, gotoMap: id === 'g_squad_ok' };
+  return { ok: true, gotoMap: id === 'g_squad_ok', gotoSquad: id === 'g_roster' };
 }
 
 export function markHubFollowSeen(save: SaveData): void {
@@ -243,16 +262,25 @@ export function markGuideArmoryOpened(save: SaveData): void {
   save.tutorialFlags.storyGuideArmoryOpened = true;
 }
 
-/** 旧档：已有战斗进度则跳过整段引导 */
-export function applyStoryMigration(save: SaveData, rawHadProgress: boolean): void {
+/**
+ * 旧档迁移：`rawHadProgressBeyondTutorial` 表示存档进度已超出教学三关，
+ * 说明是回归玩家而非「卡在教学中途」，此时才跳过整段引导。
+ * 传 true 之前务必确认进度确实越过了 TUTORIAL_LAST_STAGE_ID，
+ * 否则玩家中途退出重进会导致新手引导被整段抹掉。
+ */
+export function applyStoryMigration(save: SaveData, rawHadProgressBeyondTutorial: boolean): void {
   const tf = save.tutorialFlags;
   if (tf.storyGuideDone == null) tf.storyGuideDone = false;
   if (tf.storyHubFollowSeen == null) tf.storyHubFollowSeen = false;
   if (tf.storyGuideArmoryOpened == null) tf.storyGuideArmoryOpened = false;
+  if (tf.sweepGuideSeen == null) tf.sweepGuideSeen = false;
+  if (tf.hellGuideSeen == null) tf.hellGuideSeen = false;
+  if (tf.weaponGuideSeen == null) tf.weaponGuideSeen = false;
+  if (tf.charGuideSeen == null) tf.charGuideSeen = false;
   if (!Array.isArray(tf.storyBeatsSeen)) tf.storyBeatsSeen = [];
   if (!tf.storyChoiceLog) tf.storyChoiceLog = {};
 
-  if (rawHadProgress && !tf.storyGuideDone) {
+  if (rawHadProgressBeyondTutorial && !tf.storyGuideDone) {
     tf.storyHubFollowSeen = true;
     tf.storyGuideDone = true;
     tf.storyGuideStep = 'g_camp';
@@ -265,4 +293,9 @@ export function applyStoryMigration(save: SaveData, rawHadProgress: boolean): vo
 
 export function getHubFollowBeat(): StoryBeatDef {
   return STORY_BEATS.hub_follow!;
+}
+
+/** 营地初见引导 beat（首次进入营地时播放一次） */
+export function getCampIntroBeat(): StoryBeatDef {
+  return STORY_BEATS.camp_intro!;
 }

@@ -1,6 +1,8 @@
 /**
  * 生活服装 pifu00：读档时把营地「空穿着/隐式装甲」迁到生活服装基准。
  * v2：显式 'default' 装甲标记（旧存档）也迁到生活服装。
+ * v3：收紧装甲比例——营地非执勤点（大厅/宿舍/院子/商店…）残留的装甲标记
+ *     一次性统一换回生活服装，避免老档一进营地就穿着战斗甲。
  * 已有泳装/睡衣/私服等具体外覆不覆盖。
  */
 import { CAMP_ARMOR_MARKER, LIFEWEAR_SKIN_ID, getCharacterSkin } from '../data/characterSkins';
@@ -9,7 +11,7 @@ import { ensureCampWornMap } from './campOutfit';
 import { pushMemory } from './memory';
 import type { AiLivingSave } from './types';
 
-export const LIFEWEAR_CAMP_DEFAULT_ROLLOUT_REV = 2;
+export const LIFEWEAR_CAMP_DEFAULT_ROLLOUT_REV = 3;
 
 export function applyLifewearCampDefaultRollout(
   save: SaveData,
@@ -32,6 +34,12 @@ export function applyLifewearCampDefaultRollout(
       continue;
     }
     if (prevRev < 2 && cur === CAMP_ARMOR_MARKER) {
+      map[cid] = LIFEWEAR_SKIN_ID;
+      applied.push(cid);
+      continue;
+    }
+    // v3：老档里残留的装甲标记统一回生活服装（执勤时会按需自动换上装甲）
+    if (prevRev < 3 && cur === CAMP_ARMOR_MARKER) {
       map[cid] = LIFEWEAR_SKIN_ID;
       applied.push(cid);
     }

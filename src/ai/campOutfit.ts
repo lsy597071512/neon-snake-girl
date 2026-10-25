@@ -49,7 +49,7 @@ export function getCampLogicalSkinId(
   return getCampBaselineSkinId(characterId);
 }
 
-/** 营地最终显示皮：调教临时 > 换装过程皮 > 逻辑穿着 */
+/** 营地最终显示皮：事件临时 > 换装过程皮 > 逻辑穿着 */
 export function getCampDisplaySkinId(
   living: AiLivingSave,
   characterId: string,
@@ -57,6 +57,29 @@ export function getCampDisplaySkinId(
   const temp = living.eventTempSkins?.[characterId];
   if (temp?.eventInstanceId === DISCIPLINE_TEMP_SKIN_INSTANCE && temp.skinId) {
     return temp.skinId;
+  }
+
+  // 安抚换装中：临时层挂的 huanzhuang 不参与 getCampLogicalSkinId 的 temp 直返，
+  // 此处特判走换装过程皮（含遮布/衣柜 AI 同步语义）
+  const anfu = living.anfuSession;
+  if (
+    anfu?.active === true &&
+    anfu.characterId === characterId &&
+    anfu.phase === 'dressing' &&
+    getCharacterSkin(characterId, OUTFIT_CHANGE_SKIN_ID)?.portraitLive
+  ) {
+    return OUTFIT_CHANGE_SKIN_ID;
+  }
+
+  // 舞蹈换舞装中：与安抚 dressing 同拍显示过程皮
+  const dance = living.danceSession;
+  if (
+    dance?.active === true &&
+    dance.characterId === characterId &&
+    dance.phase === 'dressing' &&
+    getCharacterSkin(characterId, OUTFIT_CHANGE_SKIN_ID)?.portraitLive
+  ) {
+    return OUTFIT_CHANGE_SKIN_ID;
   }
 
   const pending = living.pendingOutfitChanges?.[characterId];
@@ -122,6 +145,7 @@ export function clearCampWornSkin(living: AiLivingSave, characterId: string): vo
 /** 是否可作为换装目标（过程皮不可；装甲用 default） */
 export function hasCampSkinAsset(characterId: string, skinId: string): boolean {
   if (isOutfitChangeProcessSkin(skinId)) return false;
+  // 卸甲皮：资源存在即可作为换装目标（穿着门控由 aiSkinChange.canWearXiejiaSkin 把关）
   if (isCampArmorMarker(skinId)) return true;
   return !!getCharacterSkin(characterId, skinId);
 }

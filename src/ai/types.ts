@@ -76,7 +76,7 @@ export type LivingPresence = {
 
 export type AiMemoryEntry = {
   ts: number;
-  kind: 'talk' | 'gift' | 'event' | 'combat_return' | 'outreach' | 'outreach_ignored';
+  kind: 'talk' | 'gift' | 'event' | 'combat_return' | 'outreach' | 'outreach_ignored' | 'activity_fatigue';
   summary: string;
   importance: number;
 };
@@ -103,13 +103,15 @@ export type AiMessageEvent = {
   innerThought?: string;
   /** AI 自述：为何此刻发消息（合理性审计 / 训练） */
   reason: string;
-  /** 事件分量 1–5：影响好感惩罚与后续行为幅度 */
+  /** 事件分量 1–5：影响好感扣分与后续行为幅度 */
   significance: number;
   createdAt: number;
   expiresAt: number;
   /** 当时行为/事件上下文摘要 */
   contextSummary: string;
   relatedEventInstanceId?: string;
+  /** 离线规则模拟产生的留言（用于统计/展示区分） */
+  offlineSent?: boolean;
 };
 
 /** 每角色主动消息统计（未回应连击等） */
@@ -286,6 +288,8 @@ export type AiLivingSave = {
   /** 叙事义体挂载（不改皮肤/战力） */
   characterCyberLoadout?: Record<string, Record<string, string>>;
   /** 营地房间陈设：roomId → slotId → propId */
+  /** 玩家当日发起的重复活动计数（角色 id → {dayIndex, counts}，跨天清零） */
+  activityRequests?: Record<string, import('./activityFatigue').ActivityRequestRecord>;
   campPlacements?: Record<string, Record<string, string>>;
   /**
    * 结构化事实表（承诺/称呼/约定等）
@@ -314,6 +318,11 @@ export type AiLivingSave = {
   outfitNarrativeHolds?: Record<string, OutfitNarrativeHold>;
   /** 身体锚点：对话同步的身体位置账本（resolvePresence 优先读它） */
   bodyAnchors?: Record<string, BodyAnchor>;
+  /** 走路行程：移动必须有路程时间（到点才落点/切场景） */
+  travelPlans?: Record<string, import('./travel').TravelPlan>;
+  /** 离线归来摘要：同步给 Prompt 用（到期自动失效，避免长期占上下文） */
+  offlineDigestForPrompt?: string;
+  offlineDigestExpiresAtMs?: number;
   /** @deprecated 已废弃的场景锁，读档时清除 */
   dialoguePresenceLocks?: Record<string, unknown>;
   /**
@@ -327,17 +336,82 @@ export type AiLivingSave = {
    */
   pendingItemOffer?: PendingItemOffer | null;
   /**
-   * 小黑屋调教会话（对话页；读档若 active 须自动结算）。
-   * 见 docs/discipline-event.md / src/ai/disciplineSession.ts
+   * 事件会话占位（对话页；读档若 active 须自动结算）。
    */
   disciplineSession?: import('./disciplineSession').DisciplineSessionState;
-  /** 角色主动求进小黑屋（待玩家确认） */
+  /** 事件邀请占位（待玩家确认） */
   pendingDisciplineInvite?: import('./disciplineSession').DisciplineInvitePending;
-  /** 角色主动求进日冷却：characterId → dayIndex */
+  /** 事件邀请日冷却：characterId → dayIndex */
   disciplineInviteCooldownDay?: Record<string, number>;
   /**
-   * 成人事件身体敏感点（指挥官小管道 + 美少女分区兴奋/机油）。
-   * 见 docs/adult-events.md / src/ai/bodySensitivity.ts
+   * 浴室互动会话：帮清洗 / 一同泡澡（对话页；关页/离浴室须结算）。
+   * 见 docs/bath-assist-events.md / src/ai/bathAssistSession.ts
+   */
+  bathAssistSession?: import('./bathAssistSession').BathAssistSessionState;
+  /** 角色主动提出浴室互动（待玩家确认） */
+  pendingBathAssistInvite?: import('./bathAssistSession').BathAssistInvitePending;
+  /**
+   * 舞蹈事件会话：单人独舞 / 一对一共舞（对话页；关页/离大厅须结算）。
+   * 见 src/ai/danceSession.ts
+   */
+  danceSession?: import('./danceSession').DanceSessionState;
+  /** 角色主动提出舞蹈（待玩家确认） */
+  pendingDanceInvite?: import('./danceSession').DanceInvitePending;
+  /** 指挥官提出舞蹈（待角色本轮答应） */
+  pendingPlayerDanceAsk?: import('./danceSession').DancePlayerAskPending;
+  /** 舞蹈邀请日冷却：characterId → dayIndex */
+  danceInviteCooldownDay?: Record<string, number>;
+  /** 1v1 共舞好感去重：characterId → dayIndex */
+  danceAffinityDay?: Record<string, number>;
+  /** UI 闪示一行舞蹈系统提示，展示后清空 */
+  danceUiFlash?: string;
+  /**
+   * 安抚室会话：安抚待机 / 安抚中 / 安抚疲惫（对话页；关页/离安抚室须结算）。
+   * 见 src/ai/anfuSession.ts
+   */
+  anfuSession?: import('./anfuSession').AnfuSessionState;
+  /** 角色主动提出安抚（待玩家确认） */
+  pendingAnfuInvite?: import('./anfuSession').AnfuInvitePending;
+  /** 指挥官提出安抚（待角色本轮答应） */
+  pendingPlayerAnfuAsk?: import('./anfuSession').AnfuPlayerAskPending;
+  /** 安抚邀请日冷却：characterId → dayIndex */
+  anfuInviteCooldownDay?: Record<string, number>;
+  /** 安抚每日一次：characterId → dayIndex（进入待机时消耗） */
+  anfuPlayDay?: Record<string, number>;
+  /** UI 闪示一行安抚系统提示，展示后清空 */
+  anfuUiFlash?: string;
+  /**
+   * 小游戏事件会话：五子棋 / 猜拳（对话页；关页/离房须结算）。
+   * 见 src/ai/miniGameSession.ts
+   */
+  miniGameSession?: import('./miniGameSession').MiniGameSessionState;
+  /** 角色主动提出小游戏（待玩家确认） */
+  pendingMiniGameInvite?: import('./miniGameSession').MiniGameInvitePending;
+  /** 指挥官提出小游戏（待角色本轮答应） */
+  pendingPlayerMiniGameAsk?: import('./miniGameSession').MiniGamePlayerAskPending;
+  /** 小游戏邀请日冷却：characterId → dayIndex */
+  miniGameInviteCooldownDay?: Record<string, number>;
+  /** 赛后随性奖惩窗（愿赌服输 stake；每场对话回合消耗） */
+  miniGameStake?: import('./miniGameSession').MiniGameStakeState;
+  /** UI 闪示一行小游戏系统提示，展示后清空 */
+  miniGameUiFlash?: string;
+  /** 帮洗：已换冲洗皮，等待延迟后进帮洗会话 */
+  bathAssistPrepare?: {
+    characterId: string;
+    mode: 'help_wash' | 'co_bath';
+    readyAt: number;
+  };
+  /** 指挥官提出帮洗/共浴（待角色本轮答应） */
+  pendingPlayerBathAssistAsk?: import('./bathAssistSession').BathAssistPlayerAskPending;
+  /** 口头约定去浴室冲澡（防误切泳池） */
+  pendingBathRoomRendezvous?: import('./bathAssistSession').BathRoomRendezvous;
+  /** UI 闪示一行浴室互动系统提示（同意/拒绝/切换），展示后清空 */
+  bathAssistUiFlash?: string;
+  /** 浴室邀请日冷却：characterId → dayIndex */
+  bathAssistInviteCooldownDay?: Record<string, number>;
+  /**
+   * 亲密氛围亲近区（指挥官机体核心 + 美少女分区升温/机体液）。
+   * 见 src/ai/bodySensitivity.ts
    */
   bodySensitivity?: {
     commander: import('./bodySensitivity').BodySensitivityState;
@@ -375,6 +449,12 @@ export type PendingOutfitChange = {
   phase: 'changing' | 'ready';
   announcedAtMs: number;
   readyAtMs: number;
+  /**
+   * 本次换装的目标是「事件临时外覆」而非日常穿搭：
+   * 到点后写入 eventTempSkins[instanceId]，不碰 campWornSkins。
+   * 用于营地群体事件/洗浴等需要可见换衣过程的临时皮。
+   */
+  applyAsTempInstanceId?: string;
 };
 
 /** 结构化世界意图（world_intent 字段；见 LlmDialogueResult 注释） */
@@ -534,9 +614,9 @@ export type LlmDialogueResult = {
    * 仅播放当前穿着这套的 secondaries；禁止跨皮肤。空=不播。
    */
   skin_clip?: number | string;
-  /** 调教会话本轮主导情绪（短中文） */
+  /** 事件会话本轮主导情绪（短中文，占位） */
   discipline_mood?: string;
-  /** 调教会话本轮结局倾向 */
+  /** 事件会话本轮结局倾向（占位） */
   discipline_valence?: 'tragic' | 'mixed' | 'joyful' | string;
   /**
    * 【P2·结构化世界意图】AI「怎么想」的确定性表达（优先级高于文本正则推断）：
@@ -552,8 +632,38 @@ export type LlmDialogueResult = {
    * false=仍裹巾或重新裹上 → 待机动态；""=不改。
    * 「一起洗/搓背」 alone 不够；对白仍说裹着浴巾时不可为 true。
    * 仅浴室洗浴中有效；出浴室自动失效。
+   * 浴室互动（帮洗/共浴）进行中必须为 false/""。
    */
   bath_intimate_consent?: boolean | string;
+  /**
+   * 浴室互动意图：propose_help|propose_co|end|""。
+   * 异地提出走确认条；进行中填 end 结束。start_* 一般由按钮/指挥官明确提出触发。
+   */
+  bath_assist_action?: string;
+  /**
+   * 舞蹈事件意图：propose_solo|propose_co|start_solo|start_co|stop|end|""。
+   * 只发生在大厅；指挥官按钮/打字/语音等效提出；你可主动提出（propose_*，走确认条）。
+   * 一切舞蹈先切「舞蹈待机」(pifu12) 再起舞；独舞(pifu11)为无缝循环，独舞可 stop 暂停/重开；
+   * 共舞(pifu10)按片段时长，结束后回准备态。想结束进行中的舞蹈填 end 或对白明确收尾。
+   * 非舞蹈事件填 ""。
+   */
+  dance_action?: string;
+  /**
+   * 安抚室意图：propose=你主动邀请（走确认条）；start=答应指挥官（同意后系统切安抚待机）；
+   * end=结束（待机/疲惫相为正常离开；安抚中填 end 视为中途离开，会让TA失落扣好感）。
+   * 只发生在安抚室；非安抚事件填 ""。
+   */
+  anfu_action?: string;
+  /** 安抚值判定（安抚中每轮必填）：10~40，越接近满越敏感；服务端钳制为准。 */
+  anfu_gain?: number;
+  /** 满足结算追加好感：0~3（基础 +5，合计上限 8）。 */
+  anfu_bonus?: number;
+  /**
+   * 小游戏意图：propose_gomoku|propose_rps=你主动邀请（走确认条）；
+   * start_gomoku|start_rps=答应指挥官的邀请；quit=认输/不想玩了（对局中判你负）；
+   * accept_stake|refuse_stake=赛后输赢约定（奖惩）的应答。只发生在游戏室/大厅；非小游戏事件填 ""。
+   */
+  minigame_action?: string;
   /**
    * 成人事件·身体刺激目标：self=角色自己；commander=指挥官小管道；mutual=双方。
    * 非成人事件填 ""。
@@ -567,7 +677,7 @@ export type LlmDialogueResult = {
   stim_intensity?: number | string;
   /** brief|sustained|climax */
   stim_duration?: string;
-  /** 异样情绪 1～3 词（兴奋/害羞/…/疯狂），与调教复杂情绪同源 */
+  /** 异样情绪 1～3 词（兴奋/害羞/…/迷糊），可矛盾并存 */
   adult_odd_mood?: string;
   /** 机油/敏感液排出：self|commander|both|"" */
   oil_discharge?: string;

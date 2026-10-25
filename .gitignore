@@ -22,6 +22,9 @@ android/capacitor-cordova-android-plugins/build/
 # Keystore（切勿提交）
 *.jks
 *.keystore
+keybackup-*/
+android/key.properties
+android/key.properties.bak
 
 gateway/.secrets.local.json
 gradle-build.log
@@ -33,12 +36,16 @@ tex/
 ollama/
 # 激活码（敏感，严禁入库）
 codes.txt
+# 本地成人版快照（只存在本地，严禁入库/推送/打包）
+_adult-local/
+
 # 本地工作目录与产物
 .workbuddy/
 output/
 tmp/
 tmp-bug6/
-.tmp-*/
+.tmp-*
+_tmp-*
 _combat_sync_*/
 artifacts/
 scripts/__pycache__/

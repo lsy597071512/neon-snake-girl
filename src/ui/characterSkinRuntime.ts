@@ -33,6 +33,8 @@ export function syncCharacterSkinRuntime(save: SaveData): void {
         campWornSkins?: Record<string, string>;
         eventTempSkins?: Record<string, { skinId?: string; eventInstanceId?: string }>;
         pendingOutfitChanges?: Record<string, { phase?: string }>;
+        anfuSession?: { active?: boolean; characterId?: string; phase?: string };
+        danceSession?: { active?: boolean; characterId?: string; phase?: string };
       }
     | undefined;
   if (!living) return;
@@ -60,6 +62,28 @@ export function syncCharacterSkinRuntime(save: SaveData): void {
         campSkinByChar.set(cid, OUTFIT_CHANGE_SKIN_ID);
         continue;
       }
+    }
+
+    // 安抚换装中：与 getCampDisplaySkinId 的 dressing 特判同拍
+    if (
+      living.anfuSession?.active === true &&
+      living.anfuSession.characterId === cid &&
+      living.anfuSession.phase === 'dressing' &&
+      getCharacterSkin(cid, OUTFIT_CHANGE_SKIN_ID)?.portraitLive
+    ) {
+      campSkinByChar.set(cid, OUTFIT_CHANGE_SKIN_ID);
+      continue;
+    }
+
+    // 舞蹈换舞装中：同理
+    if (
+      living.danceSession?.active === true &&
+      living.danceSession.characterId === cid &&
+      living.danceSession.phase === 'dressing' &&
+      getCharacterSkin(cid, OUTFIT_CHANGE_SKIN_ID)?.portraitLive
+    ) {
+      campSkinByChar.set(cid, OUTFIT_CHANGE_SKIN_ID);
+      continue;
     }
 
     if (temp?.skinId) {

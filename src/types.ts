@@ -273,7 +273,7 @@ export interface AiLivingSaveData {
   >;
   /** 每角色关系弧线阶段 id */
   relationshipArcStage?: Record<string, string>;
-  /** 小黑屋调教会话（可选；读档 active 须结算） */
+  /** 事件会话占位（可选；读档 active 须结算） */
   disciplineSession?: {
     active: boolean;
     characterId: string;
@@ -302,6 +302,88 @@ export interface AiLivingSaveData {
     preview: string;
   };
   disciplineInviteCooldownDay?: Record<string, number>;
+  /** 浴室互动：帮清洗 / 一同泡澡 */
+  bathAssistSession?: {
+    active: boolean;
+    characterId: string;
+    mode: 'help_wash' | 'co_bath' | string;
+    prevRoomId: string | null;
+    prevCampSkinId: string | null;
+    prevEventTemp?: {
+      skinId: string;
+      restoreSkinId: string | null;
+      eventInstanceId: string;
+    } | null;
+    startedAt: number;
+    entrySource: string;
+    justEntered?: boolean;
+    justLeft?: boolean;
+    justLeftTurnsLeft?: number;
+    settling?: boolean;
+    stickyClip?: number | null;
+    awaitingCoClipReply?: boolean;
+    pendingCoClip?: number | null;
+    lastCoClipAt?: number;
+  };
+  pendingBathAssistInvite?: {
+    characterId: string;
+    mode: 'help_wash' | 'co_bath' | string;
+    proposedAt: number;
+    dayIndex: number;
+    preview: string;
+    afterPlayerAsk?: boolean;
+    prepareWithShowerDelay?: boolean;
+  };
+  /** 舞蹈事件：单人独舞 / 一对一共舞 */
+  danceSession?: {
+    active: boolean;
+    characterId: string;
+    mode: 'solo' | 'co' | string | null;
+    phase: 'dressing' | 'prepare' | 'dancing' | string;
+    /** 换装相到点时刻 */
+    dressReadyAtMs?: number;
+    prevRoomId: string | null;
+    prevCampSkinId: string | null;
+    prevEventTemp?: {
+      skinId: string;
+      restoreSkinId: string | null;
+      eventInstanceId: string;
+    } | null;
+    startedAt: number;
+    entrySource: string;
+    hallRoomId: string;
+    awaitingAskReply?: boolean;
+    pendingAskMode?: 'solo' | 'co' | null;
+    soloIndex?: number;
+    soloPaused?: boolean;
+    coEndsAtMs?: number;
+    justEntered?: boolean;
+    justLeft?: boolean;
+    justLeftTurnsLeft?: number;
+    settling?: boolean;
+  };
+  pendingDanceInvite?: {
+    characterId: string;
+    mode: 'solo' | 'co' | string;
+    proposedAt: number;
+    dayIndex: number;
+    preview: string;
+  };
+  pendingPlayerDanceAsk?: {
+    characterId: string;
+    mode: 'solo' | 'co' | string;
+    proposedAt: number;
+    isModeSwitch?: boolean;
+  };
+  danceInviteCooldownDay?: Record<string, number>;
+  danceAffinityDay?: Record<string, number>;
+  danceUiFlash?: string;
+  bathAssistPrepare?: {
+    characterId: string;
+    mode: 'help_wash' | 'co_bath' | string;
+    readyAt: number;
+  };
+  bathAssistInviteCooldownDay?: Record<string, number>;
 }
 
 export interface SaveData {
@@ -347,6 +429,18 @@ export interface SaveData {
     storyGuideDone?: boolean;
     /** 引导期内已开过军械箱（含保底） */
     storyGuideArmoryOpened?: boolean;
+    /** 战斗内技能跟随按钮指引已展示（仅首战一次） */
+    combatSkillGuideSeen?: boolean;
+    /** 扫荡懒加载说明已展示（通关后首次见可扫荡时一次） */
+    sweepGuideSeen?: boolean;
+    /** 地狱懒加载说明已展示（首次解锁地狱时一次） */
+    hellGuideSeen?: boolean;
+    /** 武器页一句话说明已展示（首次进武器页一次） */
+    weaponGuideSeen?: boolean;
+    /** 角色面板一句话说明已展示（首次打开角色详情一次） */
+    charGuideSeen?: boolean;
+    /** 首个 BOSS 战规则指引已展示 */
+    combatBossGuideSeen?: boolean;
     /** 已播过的剧情 beat id */
     storyBeatsSeen?: string[];
     /** 选项记录（可选回放） */
@@ -361,7 +455,7 @@ export interface SaveData {
     hubMidUiVisible: boolean;
     /** 调试：消费不扣锈币，始终维持满额 */
     debugInfiniteGold: boolean;
-    /** 小黑屋/调教事件开关（默认开） */
+    /** 事件开关占位（默认关） */
     disciplineEnabled: boolean;
   };
   /** 角色营地生活 / AI 对话状态 */

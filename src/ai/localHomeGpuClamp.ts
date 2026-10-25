@@ -66,7 +66,7 @@ export function clampLocalHomeGpuDialogueResult(
 
   } else if (presence.activity === 'bathe' || presence.roomId === 'room_1f_bath') {
 
-    if (skin_change && !/^pifu03$/i.test(skin_change) && skin_change !== '""') {
+    if (skin_change && !/^(pifu03|pifu09)$/i.test(skin_change) && skin_change !== '""') {
 
       skin_change = '';
 

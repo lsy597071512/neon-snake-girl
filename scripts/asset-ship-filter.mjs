@@ -7,6 +7,27 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** tex/ 根目录（本模块位于 scripts/ 下） */
+const TEX_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'tex');
+
+/** @type {Map<string, boolean>} dama 打码版存在性缓存（rel → 是否有打码对应物） */
+const stickerCounterpartCache = new Map();
+
+/**
+ * 判断 juese/pifu/** 下的未打码 webm 是否存在 dama/<名>_sticker.webm 打码对应物。
+ * 命名规则：原版 X.webm ↔ 打码版 dama/X_sticker.webm（同目录 dama 子文件夹）。
+ */
+function hasStickerCounterpart(rel) {
+  const cached = stickerCounterpartCache.get(rel);
+  if (cached !== undefined) return cached;
+  const abs = path.join(TEX_ROOT, ...rel.split('/'));
+  const stem = path.basename(abs).replace(/\.webm$/i, '');
+  const hit = fs.existsSync(path.join(path.dirname(abs), 'dama', `${stem}_sticker.webm`));
+  stickerCounterpartCache.set(rel, hit);
+  return hit;
+}
 
 /**
  * 路径统一为正斜杠、小写，便于匹配 */
@@ -45,13 +66,12 @@ const SRC_REF_PATTERNS = [
   /^juese\/combat-back\//i,
   // 表情 pose
   /^juese\/emotion-poses\//i,
-  // 皮肤（含 6 个子目录）
+  // 皮肤（含 5 个子目录；tiaojiao 已下线，不再进包）
   /^juese\/pifu(\/|$)/i,
   /^juese\/pifu\/shuiyi(\/|$)/i,
   /^juese\/pifu\/chongzao(\/|$)/i,
   /^juese\/pifu\/shenghuoshizhuang01(\/|$)/i,
   /^juese\/pifu\/teshufuzhuang01(\/|$)/i,
-  /^juese\/pifu\/tiaojiao(\/|$)/i,
 ];
 
 /** 任意 src 静态引用路径前缀是否命中给定 tex 相对路径 */
@@ -106,9 +126,43 @@ export function shouldSkipTexShip(relPath) {
   const base = path.posix.basename(rel);
   const lower = rel.toLowerCase();
 
+  // —— 成人向资产硬拦截（市场版绝不打进 dist；本地快照 _adult-local 保留）——
+  // 说明：只拦角色皮肤/音频类成人资产，不影响 Indoor/shinei01_tiaojiaoshi.png 等普通背景图。
+  const isJuese = /(^|\/)juese\//i.test(rel);
+  if (
+    /(^|\/)tiaojiao(\/|$)/i.test(rel) ||
+    (isJuese && /tiaojiao/i.test(base)) ||
+    // 卸甲皮（xiejia，原象棋 wuziqi 失败稿目录）：抠像成品 webm 走云端 P1 分发
+    // （P1 不进 APK 首包，市场合规；玩家登录后按需下载）。
+    // 绿幕母带（YZ-H3 原始 mp4）与中间产物不进任何通道。
+    ((/(^|\/)(wuziqi|xiejia)(\/|$)/i.test(rel) || /YZ-H3/i.test(base)) && !/\.webm$/i.test(base)) ||
+    /luoti/i.test(rel) ||
+    /(^|\/)moan(\/|$)/i.test(rel) ||
+    /(_moan_|jiaochuan|jiaochuan)/i.test(base) ||
+    /tiaojiaoqidong/i.test(base)
+  ) {
+    return { skip: true, reason: 'adult-asset-blocked' };
+  }
+
+  // —— 打码原版硬拦截（市场版只用 dama/ 打码资源；未打码原版留 tex/ 本地备份，不进包）——
+  // 判定：juese/pifu/** 下的 X.webm，若同目录 dama/X_sticker.webm 存在，则 X.webm 不进包。
+  // 覆盖 chongzao / anfu / chongzao02 / chongzao02/solo 四个 dama 目录及后续新增。
+  if (
+    /^juese\/pifu\//i.test(rel) &&
+    /\.webm$/i.test(base) &&
+    !/(^|\/)dama(\/|$)/i.test(rel) &&
+    hasStickerCounterpart(rel)
+  ) {
+    return { skip: true, reason: 'uncensored-original-has-sticker' };
+  }
+
   // —— 母带 / 未使用大视频 ——
   if (lower.endsWith('.mov')) {
     return { skip: true, reason: 'master-mov' };
+  }
+  // —— 小游戏切图集原件：运行时只引用 parts/ 切件，2048 原件/原画不进包 ——
+  if (/^small_game\//i.test(rel) && !/(^|\/)parts(\/|$)/i.test(rel)) {
+    return { skip: true, reason: 'minigame-source-sheet' };
   }
   if (base === 'pv01.mp4') {
     return { skip: true, reason: 'unused-pv01' };
@@ -140,13 +194,39 @@ export function shouldSkipTexShip(relPath) {
     /(^|\/)luoti_daiji(\/|$)/i.test(rel) ||
     /(^|\/)_qa(\/|$)/i.test(rel) ||
     /(^|\/)_qa_/i.test(rel) ||
+    /(^|\/)_key_qa(\/|$)/i.test(rel) ||
+    /(^|\/)_id_qa(\/|$)/i.test(rel) ||
     /(^|\/)_qa_tease(\/|$)/i.test(rel) ||
     /(^|\/)_rekey(\/|$)/i.test(rel) ||
     /(^|\/)_webm_out(\/|$)/i.test(rel) ||
     /(^|\/)_first(\/|$)/i.test(rel) ||
-    /(^|\/)_first_/i.test(rel)
+    /(^|\/)_first_/i.test(rel) ||
+    /(^|\/)beifen(\/|$)/i.test(rel) ||
+    /(^|\/)_h3_out(\/|$)/i.test(rel)
   ) {
     return { skip: true, reason: 'authoring-junk-dir' };
+  }
+
+  // —— 角色皮肤 MP4 母带（运行时只用透明 webm；mp4 为 H3/抠绿中间件）——
+  // 白名单：根目录 pv_720p / pv_20261024 / beijing01 / shop（src 有引用）+ 抽卡页视频
+  // + 开始页过场动画 poster-candidates/{diyici,jinru,xunhuan,chuqu}.mp4（P0 首屏必须进包）。
+  if (/\.mp4$/i.test(base)) {
+    const allowRootMp4 =
+      base === 'pv_720p.mp4' ||
+      base === 'pv_20261024.mp4' ||
+      base === 'beijing01.mp4' ||
+      base === 'shop.mp4';
+    const isPosterCutscene =
+      /(^|\/)poster-candidates(\/|$)/i.test(rel) &&
+      (base === 'diyici.mp4' || base === 'jinru.mp4' || base === 'xunhuan.mp4' || base === 'chuqu.mp4');
+    if (
+      !allowRootMp4 &&
+      !isPosterCutscene &&
+      base !== 'juesechoukajiemian_dong.mp4' &&
+      base !== 'juesechoukajiemian.mp4'
+    ) {
+      return { skip: true, reason: 'juese-or-intermediate-mp4' };
+    }
   }
 
   // —— AI 流水线中间产物（v3.1：按"运行时无引用"硬规则排除）——
@@ -157,6 +237,7 @@ export function shouldSkipTexShip(relPath) {
   if (
     /(^|\/)pifu_weizhi(\/|$)/i.test(rel) ||         // 触手循环 / 位置装饰（chroma-key-to-webm 输出）
     /(^|\/)pifu\/shenghuoshizhuang01\/new(\/|$)/i.test(rel) ||  // 生活时装 AI 生成原图
+    /(^|\/)pifu\/tiaojiao\/new(\/|$)/i.test(rel) || // 调教源 MP4/WebM 与抠像 QA 中间目录
     /(^|\/)pifu\/shenghuoshizhuang01\/_key_qa(\/|$)/i.test(rel) || // 关键帧 QA 中间
     /(^|\/)pifu\/shenghuoshizhuang01\/_tent/i.test(rel) ||       // tentacle key/inventory
     /(^|\/)webm_tentacle_loop(\/|$)/i.test(rel) ||   // 触手循环 webm 库
@@ -174,8 +255,13 @@ export function shouldSkipTexShip(relPath) {
   }
 
   // —— 海报候选（运行时不用） ——
+  // 例外：开始页入场/循环/点击/退场过场动画（P0 首屏，必须进包）
+  // + 过场首帧垫底图 still_{diyici,xunhuan}.png（视频首帧渲染前的无缝垫底，防黑屏）
   if (/(^|\/)poster-candidates(\/|$)/i.test(rel)) {
-    return { skip: true, reason: 'poster-candidates' };
+    const allowed =
+      base === 'diyici.mp4' || base === 'jinru.mp4' || base === 'xunhuan.mp4' || base === 'chuqu.mp4' ||
+      base === 'still_diyici.png' || base === 'still_xunhuan.png';
+    if (!allowed) return { skip: true, reason: 'poster-candidates' };
   }
 
   // —— 未引用分镜弧线（保留 char-posters） ——

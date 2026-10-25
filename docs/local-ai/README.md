@@ -38,15 +38,30 @@
 | 强制 MTP | `... -Mtp` |
 | 关 MTP | `... -NoMtp` |
 | 停止 | `pwsh scripts/stop-fable-llamacpp.ps1` |
-| **开机自启 + 断线重连** | `pwsh scripts/install-fable-autostart.ps1`（看门狗每 2 分钟探活 `:8080` + Tailscale） |
-| 换电脑/挪仓库 | **不用记**：`start-fable` / `watchdog` / `setup-fable-q4` 会自动 `-Ensure` 重绑路径 |
+| **开机自启 + 闪退/断线重连** | `pwsh scripts/install-fable-autostart.ps1` |
+| 固定安装目录 | **`F:\Ollama\fable-home-gpu\`**（无 F:\Ollama 则 `%LOCALAPPDATA%\RustBelt-Fable-HomeGpu`） |
+| 探活间隔 | 默认 **60s**（进程没了 / 端口没了 / `/health` 失败 → 重启；Tailscale 掉线 → `up`） |
+| 计划任务 | `RustBelt-Fable-HomeGpu-Watchdog`：**登录触发** + **每 15 分钟兜底**（任务本身 RestartCount=999） |
+| 与游戏仓库 | **无关**。挪仓库、换盘装游戏都不会让自启失效；任务只指向固定目录 |
 | 卸载自启 | `... -Uninstall` |
-| 看门狗日志 | `tmp/fable-watchdog.log` |
+| 看门狗日志 | `F:\Ollama\fable-home-gpu\logs\watchdog.log` |
 | 上下文 | **16384** |
 | KV | **q8_0** + Flash Attention + cache-reuse 256 |
 | Thinking | **low**（服务端 `--reasoning auto` + 客户端 `reasoning_effort: low`；预算帽 256） |
 | max_tokens | **720**（think 占额度；过低易空 content） |
 | MTP 参数 | `--spec-type draft-mtp --spec-draft-n-max 2` |
+
+### 开机自启行为（2026-09-23 定案）
+
+1. 在游戏仓库执行一次：`pwsh scripts/install-fable-autostart.ps1`  
+   → 把 `scripts/fable-home-gpu/*` **复制**到固定目录，并注册计划任务 `RustBelt-Fable-HomeGpu-Watchdog`。
+2. **重启电脑后**：需用安装时的 Windows 用户（当前为交互登录用户）**登录进桌面**；约 45s 后看门狗启动，再拉起 `:8080`。  
+   停在登录界面不登入 → 不会启动（非系统服务，需 GPU 用户会话）。
+3. 运行中进程闪退、端口掉了、`/health` 失败 → 最多约 60s 内自动重启；Tailscale 掉线会 `tailscale up`。
+4. 挪/换游戏仓库路径 **不必再装**；只有换机器、或要更新看门狗脚本内容时，再跑一次 `install-fable-autostart.ps1`。
+5. 卸载：`... -Uninstall`（任务去掉；固定目录文件可手动删）。
+
+---
 
 ### 延迟实测摘要（2026-09-10 · 同游戏 Prompt ~5772 tokens）
 
@@ -67,7 +82,7 @@
 | 默认 Provider | `dashscope` + `qwen-plus-character` |
 | 营地「一键启用本机」 | → `openai_compatible` + `fable-q4:latest` + `:8080` |
 | `public/home-gpu-config.json` | 进 APK；`shipId` 变化强制覆盖手机旧配置 |
-| Prompt 拆分 | `systemStatic` → system；`systemDynamic` → 并入 user（ChatML） |
+| Prompt 拆分 | 整包 system（static+dynamic 同布局）＋短 user（**2026-09-12 结构硬规则**：禁止再把快照拆进 user） |
 | 本机钳制 | `localHomeGpuClamp` / `localHomeGpuPrompt` 短锁 |
 | life / TTS / ASR | **仍只走千问** |
 
@@ -76,7 +91,7 @@
 ### 相关源码
 
 - `src/ai/providerConfig.ts` — `DEFAULT_LOCAL_MODEL` / `DEFAULT_COMPAT_BASE_URL`
-- `src/ai/dialogueEngine.ts` — 拆分消息 + `maxTokens: 480`
+- `src/ai/dialogueEngine.ts` — 拆分消息 + 本地请求 maxTokens clamp 560（`Math.min(LOCAL_HOME_GPU_MAX_TOKENS, 560)`；千问对话通道默认 500）
 - `src/ai/llmClient.ts` — 兼容口 `reasoning_effort: none`
 - `src/ai/promptAssembler.ts` / `aiProfiles.ts` — 一比一去重与门控
 - `src/ui/campLivingPanel.ts` — 营地切换 UI
@@ -103,7 +118,7 @@
 - `public/home-gpu-config.json`
 - `ollama/Modelfile.fable-q4`（Ollama 备胎）
 - `scripts/start-fable-llamacpp.ps1` · `stop-fable-llamacpp.ps1` · `setup-fable-q4.ps1`
-- `scripts/watchdog-fable-home-gpu.ps1` · `install-fable-autostart.ps1`（开机自启 / 断线重连）
+- `scripts/install-fable-autostart.ps1` + `scripts/fable-home-gpu/*`（部署到固定目录的开机自启 / 看门狗）
 - 人设：`src/ai/aiProfiles.ts`
 
 GGUF **不进 git**。

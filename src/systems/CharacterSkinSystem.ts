@@ -2,8 +2,8 @@ import {
   getCharacterSkin,
   getCharacterSkins,
   getHubPurchasableSkins,
+  isAloneBathSkinId,
   isHubPurchasableSkin,
-  SHOWER_SKIN_ID,
 } from '../data/characterSkins';
 import { CHARACTER_MAP } from '../data/characters';
 import type { SaveData } from '../types';
@@ -79,8 +79,8 @@ export function applyCharacterSkin(
   if (!isHubPurchasableSkin(skin)) {
     return { ok: false, msg: '该皮肤不可设为看板娘外观' };
   }
-  if (skinId === SHOWER_SKIN_ID) {
-    return { ok: false, msg: '蒸汽毛巾仅洗浴时可临时穿着，不能设为日常外覆' };
+  if (isAloneBathSkinId(skinId)) {
+    return { ok: false, msg: '独自泡澡/蒸汽毛巾仅洗浴时可临时穿着，不能设为日常外覆' };
   }
 
   const oc = save.ownedCharacters.find((o) => o.characterId === characterId);

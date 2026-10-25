@@ -3,14 +3,16 @@ import { ECONOMY, STARTER } from '../data/stages';
 import { syncCharacterSkinRuntime } from '../ui/characterSkinRuntime';
 import { createDefaultAiLiving } from '../ai/worldClock';
 import { recoverStaleDisciplineSession } from '../ai/disciplineSession';
+import { recoverStaleBathAssistSession } from '../ai/bathAssistSession';
 import { applyCharacterPersonaResets } from '../ai/personaReset';
 import { applyPoolPartySkinRollout } from '../ai/poolPartySkinRollout';
 import { applySpecialOutfitSkinRollout } from '../ai/specialOutfitSkinRollout';
 import { applyLifewearCampDefaultRollout } from '../ai/lifewearCampDefaultRollout';
+import { resetAiMemories } from '../ai/memory';
 import { pushCompanionSync } from '../bridge/companionSync';
 import { seedCampEconomy } from '../systems/CampWarehouseSystem';
 import { SWEEP_MAX_CHARGES, syncSweepRecovery } from '../systems/SweepSystem';
-import { applyStoryMigration } from '../systems/StoryGuideSystem';
+import { applyStoryMigration, TUTORIAL_LAST_STAGE_ID } from '../systems/StoryGuideSystem';
 
 const SAVE_KEY = 'rust-belt-era-save-v1';
 const SAVE_VERSION = 8;
@@ -222,6 +224,7 @@ function migrateSave(raw: Partial<SaveData>): SaveData {
     seedCampEconomy(migrated, living);
     // 读档若卡在调教态 → 自动结算，避免永久锁皮/锁房
     recoverStaleDisciplineSession(migrated, living);
+    recoverStaleBathAssistSession(migrated, living);
   }
 
   // 看板娘必须在上场编队内；空编队则清空
@@ -234,12 +237,18 @@ function migrateSave(raw: Partial<SaveData>): SaveData {
     migrated.settings.hubFeaturedCharId = migrated.squad[0];
   }
 
-  const rawHadProgress = Boolean(
-    (Array.isArray(raw.clearedStages) && raw.clearedStages.length > 0) ||
-      (raw.stats?.stagesCleared ?? 0) > 0 ||
-      (raw.stats?.highestStage ?? 0) > 0,
+  // 「老玩家」判定必须排除教学三关内的进度：新手引导本身就要打第 1~3 关，
+  // 只要 clearedStages 非空就跳过引导的话，玩家在 g_shop / g_equip 中途退出重进，
+  // 回来会发现整段新手引导被抹掉，直接跳到「营地已开放」。
+  const rawClearedIds: number[] = Array.isArray(raw.clearedStages) ? raw.clearedStages : [];
+  const rawMaxClearedId = rawClearedIds.reduce(
+    (max, id) => (typeof id === 'number' && id > max ? id : max),
+    0,
   );
-  applyStoryMigration(migrated, rawHadProgress);
+  const rawHadProgressBeyondTutorial =
+    rawMaxClearedId > TUTORIAL_LAST_STAGE_ID ||
+    (raw.stats?.highestStage ?? 0) > TUTORIAL_LAST_STAGE_ID;
+  applyStoryMigration(migrated, rawHadProgressBeyondTutorial);
 
   applyDebugInfiniteGold(migrated);
 
@@ -281,7 +290,7 @@ export class SaveManager {
       const raw = localStorage.getItem(SAVE_KEY);
       if (!raw) return createDefaultSave();
       const migrated = migrateSave(JSON.parse(raw) as Partial<SaveData>);
-      // 迁移可能自动结束异常中断的小黑屋会话；必须立即落盘，
+      // 迁移可能自动结束异常中断的事件会话；必须立即落盘，
       // 否则下次重启会再次读到旧的 active=true 状态。
       const normalized = JSON.stringify(migrated);
       if (normalized !== raw) localStorage.setItem(SAVE_KEY, normalized);
@@ -300,8 +309,12 @@ export class SaveManager {
 
   reset(): void {
     this.data = createDefaultSave();
+    this.revision += 1;
     syncCharacterSkinRuntime(this.data);
     this.save();
+    // 存档之外还有三份永久档案（对话/生活/时间线）必须一起清，
+    // 否则新档第一次对话会把旧档聊天记录灌回来。
+    void resetAiMemories();
   }
 
   get(): SaveData {

@@ -87,6 +87,31 @@ export async function appendDialogueArchive(
   }
 }
 
+/**
+ * 重置存档时清空永久对话档案。
+ * 不清理的话，`hydrateCharacterMemoryFromArchive` 会在新档第一次对话时
+ * 把上一个档的聊天记录灌回 recentChats / memories，表现为「删档了回忆还在」。
+ */
+export async function purgeDialogueArchive(): Promise<void> {
+  try {
+    localStorage.removeItem(LS_FALLBACK);
+  } catch {
+    /* ignore */
+  }
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    /* IDB 不可用：LS 已清即可 */
+  }
+}
+
 export async function listDialogueArchive(opts?: {
   participantId?: string;
   kind?: 'player' | 'npc';

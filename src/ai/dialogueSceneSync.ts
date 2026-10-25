@@ -4,6 +4,7 @@
  */
 import { CAMP_ROOM_MAP } from '../data/campLayout';
 import { getCharacterSkin } from '../data/characterSkins';
+import { getCampDisplaySkinId } from './campOutfit';
 import { getCoScreenGroupForCharacter } from './campEvents';
 import { getCampEventDef } from './campEvents/catalog';
 import { getAgenda, isAgendaActive } from './characterAgenda';
@@ -11,21 +12,12 @@ import { resolvePresence, resolveCharacterRoomId } from './livingState';
 import type { AiLivingSave, CharacterActivity, DialogueSceneSnapshot } from './types';
 
 function resolveSkin(living: AiLivingSave, characterId: string): { key: string; name: string } {
-  const temp = living.eventTempSkins?.[characterId]?.skinId;
-  if (temp) {
-    return {
-      key: `temp:${temp}`,
-      name: getCharacterSkin(characterId, temp)?.name ?? temp,
-    };
-  }
-  const worn = living.campWornSkins?.[characterId];
-  if (worn) {
-    return {
-      key: `camp:${worn}`,
-      name: getCharacterSkin(characterId, worn)?.name ?? worn,
-    };
-  }
-  return { key: 'default', name: '默认外观' };
+  const active = getCampDisplaySkinId(living, characterId);
+  if (!active) return { key: 'default', name: '默认战斗装甲' };
+  return {
+    key: `camp:${active}`,
+    name: getCharacterSkin(characterId, active)?.name ?? active,
+  };
 }
 
 export function captureDialogueSceneSnapshot(

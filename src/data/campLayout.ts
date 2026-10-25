@@ -39,7 +39,7 @@ export type CampEdge = [string, string];
 export const CAMP_FLOOR_MAP_IMAGE: Record<CampFloor, string> = {
   1: './tex/Indoor/shinei01_1lou.jpg',
   2: './tex/Indoor/shinei01_2lou.jpg',
-  /** 负一楼暂用调教室背景作示意平面 */
+  /** 负一楼暂用室内背景作示意平面 */
   [-1]: './tex/Indoor/shinei01_tiaojiaoshi.png',
 };
 
@@ -130,22 +130,22 @@ export const CAMP_ROOMS: CampRoomDef[] = [
   { id: 'room_1f_machine', label: '机房', floor: 1, sceneId: 'indoor_jifang', kind: 'utility', notes: '发电机与锅炉', ...embedMain(73, 19) },
   { id: 'room_1f_gate', label: '大厅大门', floor: 1, sceneId: 'indoor_damen', kind: 'entrance', notes: '主楼西侧入口过渡', ...embedMain(13, 41) },
   { id: 'room_1f_hall1', label: '大厅1', floor: 1, sceneId: 'indoor_dating', kind: 'hall', notes: '一楼中央枢纽·白板工位', ...embedMain(36, 41) },
-  { id: 'room_1f_stairs', label: '楼梯', floor: 1, sceneId: 'indoor_stairs', kind: 'stairs', notes: '通往二楼与负一楼小黑屋', ...embedMain(56, 44) },
+  { id: 'room_1f_stairs', label: '楼梯', floor: 1, sceneId: 'indoor_stairs', kind: 'stairs', notes: '通往二楼与负一楼安抚室', ...embedMain(56, 44) },
   { id: 'room_1f_storage', label: '仓库', floor: 1, sceneId: 'indoor_cangku', kind: 'storage', notes: '货架木箱', ...embedMain(72, 45) },
   { id: 'room_1f_bed3', label: '卧室3', floor: 1, sceneId: 'indoor_woshi03', kind: 'bedroom', notes: '稍大卧室', ...embedMain(76, 71) },
   { id: 'room_1f_hall2', label: '大厅2', floor: 1, sceneId: 'indoor_dating02', kind: 'hall', notes: '一楼南侧大厅·星徽地坪', ...embedMain(44, 69) },
   { id: 'room_1f_mech', label: '机械区', floor: 1, sceneId: 'indoor_jixie', kind: 'mechanical', notes: '罐体粗管检修', ...embedMain(20, 71) },
 
   /**
-   * 负一楼小黑屋（调教室）：对话事件 + 营地 B1 页可见。
+   * 负一楼安抚室（原库房）：对话事件 + 营地 B1 页可见。
    */
   {
     id: 'room_b1_discipline',
-    label: '小黑屋',
+    label: '安抚室',
     floor: -1,
     sceneId: 'indoor_tiaojiaoshi',
     kind: 'discipline',
-    notes: '负一楼机器人调教室；惩罚/调教事件专用',
+    notes: '负一层安抚室；软垫与棉花，暖光',
     mapX: 50,
     mapY: 58,
   },

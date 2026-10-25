@@ -13,9 +13,9 @@ export const WORLD_INTRO_ART_SRC = './tex/beijing01.png';
 
 /**
  * 动漫版 PV。
- * 源文件：`tex/pv_720p.mov`；打包播放用 H.264 `tex/pv_720p.mp4`（由 mov 转码，兼容 Android WebView）。
+ * 源文件：`tex/pv_20261024.mp4`（H.264，兼容 Android WebView）。
  */
-export const WORLD_INTRO_VIDEO_SRC = './tex/pv_720p.mp4';
+export const WORLD_INTRO_VIDEO_SRC = './tex/pv_20261024.mp4';
 
 /** 默认模式：动漫版 */
 export type WorldIntroMode = 'anime' | 'text';

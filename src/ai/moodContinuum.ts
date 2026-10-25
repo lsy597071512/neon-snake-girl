@@ -17,9 +17,9 @@ export type MoodSnapshot = {
 
 const VALENCE_BASELINE = 8;
 const AROUSAL_BASELINE = 38;
-/** 每游戏分钟向基线漂移 */
-const VALENCE_DECAY_PER_MIN = 0.22;
-const AROUSAL_DECAY_PER_MIN = 0.18;
+/** 每游戏分钟向基线漂移（放缓：强情绪需跨大半天存续，活人定律） */
+const VALENCE_DECAY_PER_MIN = 0.09;
+const AROUSAL_DECAY_PER_MIN = 0.10;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));

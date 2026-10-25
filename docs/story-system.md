@@ -15,6 +15,12 @@ status: implemented
 > 文风参考 Galgame / JRPG：多句推进、声线鲜明、穿插玩家选择；**玩家必须一眼听懂在说什么**。
 > 2026-09-15：§八～§九全文按「可读优先」重写（反「句号写在敌上」类黑话）。
 > 2026-09-15：§〇.5 对齐 Gal/RPG；代码落地 `storyBeats` + 引导锁营地（`npm run verify-story-guide`）。
+> 2026-09-16：**表现层修复**——① `hub_follow` 开场盖场景远景，修复黑屏（`App.maybeRunStoryBoot` 传 `backdropUrl`）；② 对话框新增**表情差分**（`StoryLine.emotion` → `tex/juese/emotion-poses/`，回落角色头像；动态立绘舞台保留不动）；③ 对话框重排：表情图 + 铜色名签 + 文本入框（`storyOverlay.css`）；④ 引导坞面板图改为绝对铺满，按钮/文本不再出框，坞在场时子页滚动区底部自动让位（`.shell.has-story-guide`）。
+> 2026-09-16：**P1/P2**——⑤ 引导高亮从青色 box-shadow 改为**暗幕挖洞聚光 + 铜色指向箭头**（`.story-spotlight`，按目标实际渲染矩形挖洞，滚动跟随）；⑥ 立绘区加高至 64% + 底部渐隐融入暗幕，新增按角色取景表 `STORY_PORTRAIT_FIT`（`--story-fit-scale/--story-fit-y`）；⑦ 新增**旁白行**（`speaker: 'narration'` + `bubble: 'narration'`，斜体居中无脸无名签）进 hub_follow 与各章首 beat；⑧ 引导文案去说明书化（角色口吻说目标，UI 名保留）；⑨ 选项 C 去省略号化；⑩ 「灯」梗密度下调。
+> 2026-09-16：**真机回归修复**——⑪ 空编队时主页看板区渲染指挥官立绘 + 头像圈显示指挥官（`zhujue_portrait.png`），g_identity 高亮只指看板指挥官；⑫ **编队卡死根因修复**：子页引导坞置顶（`.story-guide-dock--top`），底部操作区不再被挡；⑬ 已在目标页时不再高亮导航入口；⑭ 跨页回退指引（战斗后停在作战图 → 高亮「返回指挥部」）；⑮ **剧情重构**：hub_follow 改为「指挥官苏醒 → 签约唤醒澪 → 唤醒芹奈 → 老板娘指引前往营地」四段叙事（签约=点灯唤醒设定），引导文案同步对齐。
+> 2026-09-17：⑯ **营地初见引导**——新增 `camp_intro` beat（旁白 + 老板娘 5 段介绍：营地=家/角色住在营地可聊天/她们会主动来找你/营地趣事预告/回商店），首次进入营地页且引导完成后播放一次（`App.maybeRunCampIntro`，背景用一楼大厅 `shinei01_yilou_dating.png`，可跳过，`storyBeatsSeen` 记录幂等；老档进营地也会补播一次）。⑰ 挖洞全局滚动跟随（document 捕获）、作战图高亮关卡节点+出战按钮、任务页高亮领取按钮、引导坞可折叠（`.is-collapsed`，点坞体切换）。
+> 2026-09-17：⑱ **剧情情绪 BGM**——`StoryBeatDef.bgm` 四档（calm=平和 pinghe.mp3 / calm2=平和2 pinghe02.mp3 / tense=紧张 jinzhang.mp3 / truth=真相 zhenxiang.mp3，见 `src/audio/bgm.ts` 的 `storyCalm/storyCalm2/storyTense/storyTruth` 轨）；配置：开场 hub_follow 与 s1-1~s1-3=calm，营地初见与各章首=calm2，各章 7 号小 Boss=tense，各章 12 号章末=truth；`playStoryBeat` 开播切轨、收场恢复原曲（战斗场随后被 combat 轨接管）。新 mp3 放 `music/` 根目录即自动进包（sync-tex-assets 整目录拷贝）。
+> 2026-10-14：⑲ **引导调优**——① `s2-1` 玲开场删重复句；② 8 个空选项分支补反应句（s1-7/s2-12/s3-7/s4-1/s4-7/s4-12/s5-1/s5-12，选完不再静默进汇合）；③ `g_squad`/`g_stage1` 去说明书化（战力/扫荡/地狱讲解收进 tour 点读牌，坞文本只留动作）；④ `g_camp` 确认键改「进入营地」（与随后 `camp_intro` 的「知道了」不再连点两次同文案）；⑤ 确认步引导坞不再 3 秒自动折叠（确认键在坞内）；⑥ §八 `g_shop` 高亮更正为商城（与代码一致）。
 
 ---
 

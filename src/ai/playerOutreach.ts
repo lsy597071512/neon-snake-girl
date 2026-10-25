@@ -16,7 +16,7 @@ import {
 } from './characterAgenda';
 import { listActiveCampEventsForUi } from './campEvents';
 import { getPersona, evolvePersonaAfterTalk } from './characterPersona';
-import { applyMoodImpulse } from './moodContinuum';
+import { applyMoodImpulse, describeMoodContinuumForPrompt, getMoodSnapshot } from './moodContinuum';
 import { chatJsonRouted, hasDialogueApiKey, hasLifePathApiKey } from './llmRouter';
 import { resolvePresence } from './livingState';
 import { getRecentChatLines, pushCampLog, pushMemory, pushRecentChat } from './memory';
@@ -45,7 +45,7 @@ const MAX_PENDING = 3;
 const CHAR_COOLDOWN_MS = 2.5 * 60_000;
 /** 刚与玩家对谈结束后的静默期（避免答应办事后立刻另起话题） */
 const POST_TALK_QUIET_MS = 12 * 60_000;
-/** 未回应连击达到此值后加重好感惩罚 */
+/** 未回应连击达到此值后加重好感扣分 */
 const UNANSWERED_STREAK_SOFT = 2;
 
 type LlmOutreachDecision = {
@@ -97,7 +97,7 @@ function normalizeKind(raw: string | undefined): AiMessageKind {
   return 'chat';
 }
 
-/** 过期未处理的消息 → ignored，写惩罚 */
+/** 过期未处理的消息 → ignored，记录扣分 */
 export function expireStaleAiMessages(living: AiLivingSave, now = Date.now()): number {
   ensureQueues(living);
   let n = 0;
@@ -116,6 +116,69 @@ export function expireStaleAiMessages(living: AiLivingSave, now = Date.now()): n
     living.pendingAiMessages = living.pendingAiMessages.slice(-12);
   }
   return n;
+}
+
+/**
+ * 离线期间到期的消息：指挥官不在场，不算「被无视」——不扣好感。
+ * 只留一条「你不在，她等了很久」的记忆，随后按 cancelled 清理。
+ */
+export function expireMessagesWhileOffline(living: AiLivingSave, now = Date.now()): number {
+  ensureQueues(living);
+  let n = 0;
+  for (const msg of living.pendingAiMessages!) {
+    if (msg.status !== 'pending') continue;
+    if (now < msg.expiresAt) continue;
+    msg.status = 'cancelled';
+    n += 1;
+    pushMemory(living, msg.characterId, {
+      kind: 'outreach_ignored',
+      summary: `指挥官离线期间她发过「${msg.preview}」，等不到回音（不算被无视，不扣好感）`,
+      importance: 3,
+    });
+    pushCampLog(living, {
+      text: `${CHARACTER_MAP[msg.characterId]?.name ?? msg.characterId} 的消息在指挥官离线期间过期（不作扣分）`,
+      source: 'system',
+      characterIds: [msg.characterId],
+    });
+  }
+  return n;
+}
+
+/**
+ * 离线模拟出的「她给你留的话」：以刚收到的形式投递，TTL 正常计算。
+ * 内容由规则模板生成，不经过 LLM。
+ */
+export function enqueueOfflineOutreach(
+  living: AiLivingSave,
+  characterId: string,
+  text: string,
+  now = Date.now(),
+): boolean {
+  ensureQueues(living);
+  const preview = text.trim().slice(0, 36);
+  if (!preview) return false;
+  const presence = resolvePresence(characterId, living);
+  const msg: AiMessageEvent = {
+    messageId: newMessageId(),
+    characterId,
+    status: 'pending',
+    kind: 'chat',
+    preview,
+    openingDialogue: text.trim().slice(0, 160),
+    reason: '指挥官离线期间想找你说话',
+    significance: 2,
+    createdAt: now,
+    expiresAt: now + MSG_TTL_MS,
+    contextSummary: `离线期间留的话｜${presence.behavior}`,
+    offlineSent: true,
+  };
+  living.pendingAiMessages!.push(msg);
+  pushCampLog(living, {
+    text: `${CHARACTER_MAP[characterId]?.name ?? characterId} 在你离线时给你留了话：「${preview}」`,
+    source: 'system',
+    characterIds: [characterId],
+  });
+  return true;
 }
 
 export function listPendingAiMessages(living: AiLivingSave, now = Date.now()): AiMessageEvent[] {
@@ -139,6 +202,19 @@ function hardBlockReason(
   if (sleepBlock) return sleepBlock;
   if (activity === 'sleeping') return '正在睡觉，不该发消息';
   if (activity === 'bathe') return '正在洗浴，不方便发消息';
+  // 独占玩法事件进行中：人正在跳舞/安抚/帮洗，不会同时摸出手机找你
+  if (living.danceSession?.active && living.danceSession.characterId === characterId) {
+    return '正在舞蹈事件中，不会主动发消息';
+  }
+  if (living.anfuSession?.active && living.anfuSession.characterId === characterId) {
+    return '正在安抚室，不会主动发消息';
+  }
+  if (
+    living.bathAssistSession?.active &&
+    living.bathAssistSession.characterId === characterId
+  ) {
+    return '正在浴室互动中，不会主动发消息';
+  }
   return null;
 }
 
@@ -199,6 +275,7 @@ function buildContextBlock(living: AiLivingSave, characterId: string): string {
     persona
       ? `【今日模式】${persona.dayMode}｜心情：${persona.moodNote}｜计划：${persona.dayPlan}`
       : '',
+    describeMoodContinuumForPrompt(living, characterId),
     `【人生目标】${goalLine}`,
     `【当前欲望】${desireTop}`,
     `【对玩家好感】${affinity}/100；近期未回应主动消息连击 ${stats.unansweredCount}`,
@@ -398,6 +475,39 @@ function decideOutreachLocal(
       kind: goal.kind === 'gift_bond' ? 'chat' : 'ask_help',
       ...pick,
       reason: `人生目标推进中（${Math.round(goalPct * 100)}%），主动找指挥官`,
+      significance: 3,
+    };
+  }
+
+  // 心情连续体差（与 withdrawn 正交）：优先 vent 池——低落时也会主动找人，但语气偏闷
+  const moodNow = getMoodSnapshot(living, characterId);
+  if (moodNow.valence <= -40) {
+    const ventPool = [
+      {
+        preview: '……在吗',
+        opening: `通讯里只有很轻的一声：「……你忙吗。没事的话，陪我说两句也行。」`,
+        action: '把通讯屏幕亮度调得很低',
+        inner_thought: '心里有点堵，想找个人待一会儿',
+      },
+      {
+        preview: '说不上来',
+        opening: `${name}：「不是什么大事……就是心里闷。你听着就行，不用回话。」`,
+        action: '吸了口气才把消息发出去',
+        inner_thought: '说出来可能会好一点',
+      },
+      {
+        preview: '想找你说说',
+        opening: `${name}：「今天不太顺。你那边……方便听我嘟囔两句吗。」`,
+        action: '抱着膝盖坐在床沿等回音',
+        inner_thought: '只有他不会笑我这样',
+      },
+    ];
+    const pick = pickFreshTemplate(ventPool, recent, characterId, living.dayIndex + 23);
+    return {
+      should_send: true,
+      kind: 'vent',
+      ...pick,
+      reason: `心情「${moodNow.labelZh}」（valence 偏低），想找指挥官倾诉`,
       significance: 3,
     };
   }
@@ -613,7 +723,7 @@ export async function tickPlayerOutreach(
   ensureQueues(living);
   const expired = expireStaleAiMessages(living, now);
   if (expired > 0 && !opts.forceCharacterId) {
-    // 先消化过期，本拍不再叠加新消息，避免惩罚与新消息抢戏
+    // 先消化过期，本拍不再叠加新消息，避免扣分与新消息抢戏
     return { kind: 'expired', detail: String(expired) };
   }
 
@@ -648,6 +758,10 @@ export async function tickPlayerOutreach(
     if (desire.scores.social >= 45) score += 0.8;
     if (goalPct >= 0.4) score += 0.7 + goalPct;
     if (goal.kind === 'gift_bond' || goal.kind === 'promise') score += 0.35;
+    // 心情连续体：心情好更愿意主动示好/邀约；心情差也会想找人但欲望低一些
+    const mood = getMoodSnapshot(living, c.id);
+    if (mood.valence >= 40) score += 0.9;
+    else if (mood.valence <= -40) score += 0.3;
     score += Math.random() * 0.8;
     return { ...c, score };
   });

@@ -1,5 +1,14 @@
 apply plugin: 'com.android.application'
 
+// 固定 release 签名：换电脑打包也能覆盖安装（热更），避免 -7 签名冲突导致玩家重装丢档。
+// 未提供 key.properties 时回退到 debug 签名，仅供本地自测，切勿用于发布。
+def keystorePropsFile = rootProject.file('key.properties')
+def keystoreProps = new Properties()
+def hasReleaseKeystore = keystorePropsFile.exists()
+if (hasReleaseKeystore) {
+    keystoreProps.load(new FileInputStream(keystorePropsFile))
+}
+
 android {
     namespace = "com.rustbelt.era"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,7 +16,7 @@ android {
         applicationId "com.rustbelt.era"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        versionCode 14
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -16,10 +25,24 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasReleaseKeystore) {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (hasReleaseKeystore) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
@@ -43,6 +66,31 @@ dependencies {
 }
 
 apply from: 'capacitor.build.gradle'
+
+// 每台打包机都跑一次，确认 release 签名指纹一致（不一致 = 玩家必须重装丢档）
+tasks.register('printReleaseSigning') {
+    doLast {
+        if (!hasReleaseKeystore) {
+            println '!! 未找到 android/key.properties —— release 包会退回 debug 签名，换机器必然签名冲突。'
+            println '!! 运行: pwsh scripts/android-signing-init.ps1'
+            return
+        }
+        def ksPath = rootProject.file(keystoreProps['storeFile'])
+        if (!ksPath.exists()) {
+            throw new GradleException("key.properties 指向的 keystore 不存在: ${ksPath}")
+        }
+        def ksType = java.security.KeyStore.getDefaultType()
+        def certs = java.security.KeyStore.getInstance(ksType)
+        certs.load(new FileInputStream(ksPath), keystoreProps['storePassword'].toCharArray())
+        def cert = certs.getCertificate(keystoreProps['keyAlias'])
+        if (!cert) throw new GradleException("keystore 中找不到 alias: ${keystoreProps['keyAlias']}")
+        def digest = java.security.MessageDigest.getInstance('SHA-256').digest(cert.encoded)
+        def hex = digest.collect { String.format('%02X', it) }.join()
+        println "keystore : ${ksPath}"
+        println "alias    : ${keystoreProps['keyAlias']}"
+        println "SHA-256  : ${hex}"
+    }
+}
 
 try {
     def servicesJSON = file('google-services.json')

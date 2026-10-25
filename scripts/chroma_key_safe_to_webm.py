@@ -85,14 +85,24 @@ def main() -> int:
     ap.add_argument("--key-color", default="auto", choices=["auto", *KEY_PRESETS.keys()])
     ap.add_argument("--key-rgb", type=parse_key_rgb, help="Manual key R,G,B (overrides --key-color)")
     ap.add_argument("--fps", type=float, default=24.0)
-    ap.add_argument("--crf", type=int, default=20)
+    ap.add_argument("--crf", type=int, default=20, help="VP9 quality; lower is better (default 20)")
+    ap.add_argument(
+        "--lossless",
+        action="store_true",
+        help="Use VP9 lossless mode; recommended when every RGB detail must be retained",
+    )
     ap.add_argument(
         "--min-bbox-h",
         type=float,
-        default=0.70,
-        help="Min rembg vertical coverage (default 0.70; use ~0.55 for sleep/curled poses)",
+        default=0.55,
+        help="Min rembg vertical coverage (default 0.55; use ~0.55 for sleep/curled poses)",
     )
     ap.add_argument("--force", action="store_true")
+    ap.add_argument(
+        "--gpu",
+        action="store_true",
+        help="Use CUDAExecutionProvider when onnxruntime-gpu is installed",
+    )
     ap.add_argument(
         "--preserve-subject",
         action="store_true",
@@ -102,7 +112,36 @@ def main() -> int:
 
     from rembg import new_session
 
-    session = new_session("u2net")
+    providers = None
+    if args.gpu:
+        import os
+        import sysconfig
+
+        site_root = Path(sysconfig.get_paths()["purelib"])
+        dll_handles = []
+        dll_dirs = [
+            d
+            for d in list(site_root.glob("nvidia/**/bin")) + list(site_root.glob("nvidia/**/bin/*"))
+            if d.is_dir()
+        ]
+        os.environ["PATH"] = os.pathsep.join(str(d) for d in dll_dirs) + os.pathsep + os.environ.get("PATH", "")
+        for dll_dir in dll_dirs:
+            dll_handles.append(os.add_dll_directory(str(dll_dir)))
+
+        import onnxruntime as ort
+
+        available = ort.get_available_providers()
+        if "CUDAExecutionProvider" in available:
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        elif "DmlExecutionProvider" in available:
+            providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
+        else:
+            raise RuntimeError(
+                "--gpu requested, but CUDA/DirectML is unavailable; "
+                f"available providers: {available}"
+            )
+        print(f"GPU inference enabled: {providers}", flush=True)
+    session = new_session("u2net", providers=providers) if providers else new_session("u2net")
     name_map = load_name_map(args.name_map)
     only = {s.strip() for s in args.only.split(",") if s.strip()}
 
@@ -134,6 +173,7 @@ def main() -> int:
             key_color=args.key_color,
             fps=args.fps,
             crf=args.crf,
+            lossless=args.lossless,
             force=args.force,
             min_bbox_h=args.min_bbox_h,
             preserve_subject=args.preserve_subject,

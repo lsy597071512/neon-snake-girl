@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 营地生活面板：角色信息总览 + 全部 AI 调试入口集中于此。
  */
 import { playUiSound } from './uiSound';
@@ -38,6 +38,7 @@ import { listStructuredFacts } from '../ai/structuredFacts';
 import { campMoodChip, getMoodSnapshot } from '../ai/moodContinuum';
 import { listBondContentUnlocks } from '../systems/AffinityGameplay';
 import { getStoredApiKey, hasApiKey, setStoredApiKey } from '../ai/llmClient';
+import { runNetworkDiagnostics, summarizeDiagnostics } from '../ai/netDiagnostics';
 import {
   getConfiguredChatModel,
   getConfiguredLifeModel,
@@ -57,6 +58,7 @@ import {
   getCompatApiKey,
   getCompatBaseUrl,
   getCompatModel,
+  isLocalGpuEnabled,
   parseHomeGpuConfigJson,
   setChatProvider,
   setCompatApiKey,
@@ -90,11 +92,14 @@ import {
   clearDialogueVoiceSession,
   formatProsody,
   getCharacterVoiceProfile,
+  getVoiceWorkspaceId,
   isVoiceEnabled,
   listCharacterVoiceProfiles,
-  QWEN_TTS_MODEL,
+  QWEN_AUDIO_TTS_MODEL,
+  resetVoiceIdentities,
   resolveQwenProsody,
   setVoiceEnabled,
+  setVoiceWorkspaceId,
   speakDialogue,
 } from '../ai/voice';
 import type { AiMessageEvent, CampEventReactionKind } from '../ai/types';
@@ -255,7 +260,7 @@ export function showCampLivingPanel(opts: CampLivingOptions = {}): void {
                 <div class="cl-char-row2">
                   <span>好感 <b>${aff}</b>·${escapeHtml(describeAffinity(aff))}</span>
                   <span>弧线 <b>${escapeHtml(arc.labelZh)}</b></span>
-                  <span class="cl-mood" title="情绪连续体">心情 <b>${escapeHtml(moodChip)}</b></span>
+                  <span class="cl-mood${moodSnap.valence <= -35 ? ' is-low' : moodSnap.valence >= 40 ? ' is-high' : ''}" title="情绪连续体：${escapeHtml(moodSnap.labelZh)}（愉悦 ${moodSnap.valence}｜唤醒 ${moodSnap.arousal}）">心情 <b>${escapeHtml(moodChip)}</b></span>
                   <span>战力 <b>${snap?.power ?? '—'}</b></span>
                   <span>义体健康 <b class="${cyberHp <= 9 ? 'is-neg' : ''}">${cyberHp}</b>${cyberOpen ? '⚠' : ''}</span>
                   <span>${escapeHtml(activityLabel(p.activity))}</span>
@@ -572,24 +577,34 @@ export function showCampLivingPanel(opts: CampLivingOptions = {}): void {
               <input type="checkbox" data-voice-enabled ${isVoiceEnabled() ? 'checked' : ''} />
               启用语音能力（麦克风说话→角色语音回复；打字→纯文字）
             </label>
-            <p class="camp-living-hint">模型：${escapeHtml(QWEN_TTS_MODEL)} · 与对话共用 Qwen API Key（百炼）。失败时可回退系统朗读。</p>
+            <p class="camp-living-hint">模型：${escapeHtml(QWEN_AUDIO_TTS_MODEL)}（Qwen-Audio-TTS·支持人设指令） · 与对话共用 Qwen API Key（百炼）。失败时自动退回旧通道/系统朗读。</p>
             <p class="camp-living-hint">ASR：有 Key → 百炼识别；无 Key 时系统语音识别（国内机可能报错）。TTS 不再使用 Edge 免费音色。</p>
             <p class="camp-living-hint">每位角色独立基础/系统音色，偏年轻女孩；再用语速音高 + instruction 拉开人设。</p>
+            <label class="cl-field">百炼业务空间 ID（可选；Qwen-Audio-TTS 专属域名用）
+              <input type="text" data-voice-workspace placeholder="留空则用通用 dashscope 域名" value="${escapeHtml(getVoiceWorkspaceId())}" />
+            </label>
+            <button type="button" class="btn btn-secondary btn-sm" data-voice-workspace-save>保存业务空间 ID</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-voice-reset-lock>重置音色锁定</button>
+            <p class="camp-living-hint">每个角色首次出声后即锁定"通道+声线"，之后只允许同一声线重试，绝不中途换人（宁可这一句静音）。改完音色配置可点此解锁一次。</p>
             <h4>13 人音色表</h4>
             <ul class="cl-list cl-voice-list">${voiceRows}</ul>
           </section>
           <section class="cl-sec camp-living-api">
             <h3>模型 / API</h3>
-            <label>对话 Provider（默认千问；可切本机 Fable Q4 做 A/B）
+            ${
+              isLocalGpuEnabled()
+                ? `<label>对话 Provider（默认千问；可切本机 Fable Q4 做 A/B）
               <select data-provider-select>
                 ${PROVIDER_OPTIONS.map(
                   (o) =>
                     `<option value="${o.id}"${o.id === getChatProvider() ? ' selected' : ''}>${escapeHtml(o.label)} — ${escapeHtml(o.note)}</option>`,
                 ).join('')}
               </select>
-            </label>
+            </label>`
+                : ''
+            }
             ${
-              getChatProvider() === 'dashscope'
+              getChatProvider() === 'dashscope' || !isLocalGpuEnabled()
                 ? `<label>千问对话模型（当前 ${escapeHtml(getConfiguredChatModel())}）
               <select data-model-select>
                 ${MODEL_OPTIONS.map(
@@ -603,7 +618,8 @@ export function showCampLivingPanel(opts: CampLivingOptions = {}): void {
               <input type="password" data-api-key placeholder="${hasApiKey() ? '已保存（可覆盖）' : 'sk-…'}" value="" />
             </label>
             <button type="button" class="btn btn-secondary btn-sm" data-save-key>保存 Qwen Key</button>
-            <p class="camp-living-hint">默认方案保留 qwen-plus-character；Key 只存在本机。</p>`
+            <button type="button" class="btn btn-secondary btn-sm" data-net-diag>网络自检</button>
+            <p class="camp-living-hint">默认方案保留 qwen-plus-character；Key 只存在本机。连不上千问时点「网络自检」，会区分是断网、还是千问域名解析失败。</p>`
                 : `            <p class="camp-living-hint">外地测试：电脑保持 <code>Ollama</code> + Cloudflare 隧道（或 <code>npm run start:remote-gpu</code>）。点下面按钮会<strong>自动填好 Base URL / 模型</strong>，不用手填高级。</p>
             <div class="camp-living-nav" style="flex-wrap:wrap;gap:8px;margin:8px 0">
               <button type="button" class="btn btn-primary btn-sm" data-gpu-local>① 一键启用本机 Fable Q4</button>
@@ -635,6 +651,7 @@ export function showCampLivingPanel(opts: CampLivingOptions = {}): void {
               <input type="password" data-api-key placeholder="${hasApiKey() ? '已保存（可覆盖）' : 'sk-…'}" value="" />
             </label>
             <button type="button" class="btn btn-secondary btn-sm" data-save-key>保存 Qwen Key</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-net-diag>网络自检</button>
             <p class="camp-living-hint">当前：${escapeHtml(getCompatModel())} @ ${escapeHtml(getCompatBaseUrl())}</p>`
             }
           </section>
@@ -1030,6 +1047,14 @@ export function showCampLivingPanel(opts: CampLivingOptions = {}): void {
         render();
       }
     });
+    overlay.querySelector('[data-net-diag]')?.addEventListener('click', () => {
+      playUiSound('tap');
+      setNote('网络自检中…');
+      void runNetworkDiagnostics().then((checks) => {
+        const lines = checks.map((c) => `${c.label}${c.status === 'ok' ? '通' : '×'}(${c.detail})`);
+        setNote(`${summarizeDiagnostics(checks)} ｜ ${lines.join(' ; ')}`);
+      });
+    });
     overlay.querySelector('[data-save-compat]')?.addEventListener('click', () => {
       const base = overlay.querySelector<HTMLInputElement>('[data-compat-base]');
       const model = overlay.querySelector<HTMLInputElement>('[data-compat-model]');
@@ -1212,6 +1237,17 @@ export function showCampLivingPanel(opts: CampLivingOptions = {}): void {
       playUiSound('tap');
       setNote(`语音朗读已${isVoiceEnabled() ? '开启' : '关闭'}`);
     });
+    overlay.querySelector('[data-voice-reset-lock]')?.addEventListener('click', () => {
+      resetVoiceIdentities();
+      playUiSound('tap');
+      setNote('已重置音色锁定，下次说话会重新绑定当前配置的声线');
+    });
+    overlay.querySelector('[data-voice-workspace-save]')?.addEventListener('click', () => {
+      const input = overlay.querySelector<HTMLInputElement>('[data-voice-workspace]');
+      setVoiceWorkspaceId(input?.value ?? '');
+      playUiSound('tap');
+      setNote('业务空间 ID 已保存（Qwen-Audio-TTS 专属域名）');
+    });
     overlay.querySelectorAll('[data-tts-sample]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const id = (btn as HTMLElement).dataset.ttsSample!;
@@ -1272,17 +1308,19 @@ export function showCampLivingPanel(opts: CampLivingOptions = {}): void {
   document.body.appendChild(overlay);
   render();
 
-  // 打开营地生活：强制用包内最新隧道+模型覆盖手机 localStorage 里的旧地址
-  void forceApplyShippedHomeGpuConfig().then((r) => {
-    if (!r.ok) {
-      setNote(`自动配置失败：${r.reason}`);
-      return;
-    }
-    setNote(
-      r.forced
-        ? `已强制更新家里云端 · ${r.model}`
-        : `家里云端已是最新 · ${r.model}`,
-    );
-    render();
-  });
+  // 只在用户当前选择了家里 GPU 时刷新包内配置；打开面板不能改变 Provider。
+  if (getChatProvider() === 'openai_compatible') {
+    void forceApplyShippedHomeGpuConfig().then((r) => {
+      if (!r.ok) {
+        setNote(`自动配置失败：${r.reason}`);
+        return;
+      }
+      setNote(
+        r.forced
+          ? `已强制更新家里云端 · ${r.model}`
+          : `家里云端已是最新 · ${r.model}`,
+      );
+      render();
+    });
+  }
 }

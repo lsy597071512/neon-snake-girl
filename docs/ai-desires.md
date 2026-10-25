@@ -135,16 +135,20 @@ decayDesire(living, characterId, desire: DesireId, amount: number)
 
 ## 泳装欲望的特殊规则
 
+> **2026-09-16 同步源码**（`src/ai/emotionOutfit.ts`）：概率已从 28% 下调至 18%，与 [character-skins.md](./character-skins.md) 对齐。
+
 ```typescript
-// 欲望分 ≥ 55 时，强制换泳装（确定性）
-if (desireScores.swim >= 55) {
-  applyOutfit('pifu01');  // 泳装
+// ① 泳池意图/场景 或 欲望分 ≥ 55 → 确定性换泳装
+if (hasPool && (room === 'room_1f_pool' || /pool|swim|浴后|洗后/.test(goal)
+    || desireScores.swim >= 55)) {
+  applyOutfit(POOL_PARTY_SKIN_ID);  // 泳池派对外覆
 }
 
-// 欲望分 40-54 时，按概率换泳装
-if (desireScores.swim >= 40 && desireScores.swim < 55) {
-  if (Math.random() < 0.28) {  // 28% 概率
-    applyOutfit('pifu01');
+// ② 偶发泳装：白天心情 playful 且 swim ≥ 35 时，18% 概率
+if (hasPool && !night && dayMode === 'playful'
+    && desireScores.swim >= 35) {
+  if (hash01(characterId, salt) < 0.18) {  // 18% 概率（原 28%，已下调）
+    applyOutfit(POOL_PARTY_SKIN_ID);
   }
 }
 ```

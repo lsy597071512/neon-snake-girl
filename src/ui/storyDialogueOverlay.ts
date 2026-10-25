@@ -10,16 +10,38 @@ import {
   canPlayLivePortrait,
   getLivePortraitSrc,
 } from './livePortrait';
-import { getCharPortraitSrc } from './uiAssets';
+import { getCharAvatarSrc, getCharPortraitSrc } from './uiAssets';
+import { emotionPosePath } from '../data/characterEmotionPoses';
 import { SUB_UI, subUi } from './subUiAssets';
 import { texUrl } from '../utils/texUrl';
 import { playUiSound } from './uiSound';
+import { getBgmTrack, getStoryBgmTrack, setBgmTrack } from '../audio/bgm';
 
 const TYPE_MS = 22;
 /** 剧情用立绘（绿幕抠像后）；勿用三视图 zhujue.png */
 const COMMANDER_PORTRAIT_SRC = './tex/zhujue_portrait.png';
 /** 立绘渐隐渐显时长 */
 const PORTRAIT_FADE_MS = 380;
+
+/** 剧情立绘取景微调（scale / translateY）；默认 1.48 / 10%，按角色体型校准 */
+const STORY_PORTRAIT_FIT: Record<string, { scale?: number; y?: string }> = {
+  ashcrow: { scale: 1.45, y: '9%' },
+  heartforge: { scale: 1.45, y: '9%' },
+  stellar: { scale: 1.42, y: '8%' },
+  outercore: { scale: 1.52, y: '11%' },
+  skyshard: { scale: 1.52, y: '11%' },
+  pulse: { scale: 1.52, y: '11%' },
+};
+
+/** 取景 CSS 变量（写入 .story-portrait-frame 内联样式） */
+function storyFitStyle(charId: string): string {
+  const fit = STORY_PORTRAIT_FIT[charId];
+  if (!fit) return '';
+  const parts: string[] = [];
+  if (fit.scale != null) parts.push(`--story-fit-scale:${fit.scale}`);
+  if (fit.y != null) parts.push(`--story-fit-y:${fit.y}`);
+  return parts.length ? ` style="${parts.join(';')}"` : '';
+}
 
 export type StoryPlayResult = {
   skipped: boolean;
@@ -64,6 +86,24 @@ function speakerName(line: StoryLine): string {
   return '???';
 }
 
+/** 对话框表情图：优先 emotion_pose 表情差分，回落角色头像/正脸立绘 */
+function resolveStoryFaceSrc(line: StoryLine | { kind: 'commander' }): string | null {
+  if ('kind' in line) return COMMANDER_PORTRAIT_SRC;
+  if (line.speaker === 'shopkeeper') {
+    return (line.shopkeeperFacing ?? 'front') === 'back'
+      ? CAMP_SHOPKEEPER_ART.back
+      : CAMP_SHOPKEEPER_ART.front;
+  }
+  if (line.speaker === 'commander') return COMMANDER_PORTRAIT_SRC;
+  if (line.speaker !== 'char' || !line.charId) return null;
+  const pose = line.emotion ? emotionPosePath(line.charId, line.emotion) : null;
+  return (
+    pose ??
+    getCharAvatarSrc(line.charId) ??
+    getCharPortraitSrc(line.charId, 'front', { skinChannel: 'none' })
+  );
+}
+
 function buildPortraitHtml(charId: string, active: boolean): string {
   const live = getLivePortraitSrc(charId, { skinChannel: 'none' });
   const cls = `story-portrait${active ? ' is-active' : ' is-dim'}`;
@@ -71,7 +111,7 @@ function buildPortraitHtml(charId: string, active: boolean): string {
     const poster = getCharPortraitSrc(charId, 'front', { skinChannel: 'none' });
     const posterAttr = poster ? ` poster="${texUrl(poster)}"` : '';
     return `<div class="${cls}" data-story-char="${charId}">
-      <div class="story-portrait-frame">
+      <div class="story-portrait-frame"${storyFitStyle(charId)}>
         <video class="story-portrait-video" src="${texUrl(live)}"${posterAttr}
           autoplay muted loop playsinline webkit-playsinline preload="metadata"></video>
       </div>
@@ -80,7 +120,7 @@ function buildPortraitHtml(charId: string, active: boolean): string {
   const src = getCharPortraitSrc(charId, 'front', { skinChannel: 'none' });
   if (src) {
     return `<div class="${cls}" data-story-char="${charId}">
-      <div class="story-portrait-frame">
+      <div class="story-portrait-frame"${storyFitStyle(charId)}>
         <img class="story-portrait-img" src="${texUrl(src)}" alt="" />
       </div>
     </div>`;
@@ -144,6 +184,9 @@ function buildPortraitsHtml(line: StoryLine): string {
 
 export function playStoryBeat(beat: StoryBeatDef, opts?: StoryPlayOptions): Promise<StoryPlayResult> {
   return new Promise((resolve) => {
+    // 剧情情绪 BGM：开播切情绪轨，收场恢复原曲目（战斗场原曲为 hub，随后立刻被 combat 接管）
+    const prevBgm = getBgmTrack();
+    if (beat.bgm) void setBgmTrack(getStoryBgmTrack(beat.bgm));
     const host = document.getElementById('app') ?? document.body;
     const overlay = document.createElement('div');
     overlay.className = 'story-overlay';
@@ -166,9 +209,12 @@ export function playStoryBeat(beat: StoryBeatDef, opts?: StoryPlayOptions): Prom
           <div class="story-box wl-sub-panel wl-sub-panel--lower" data-story-box>
             <img class="wl-sub-panel-frame" src="${subUi(SUB_UI.panelLower)}" alt="" />
             <div class="wl-sub-panel-body story-box-body">
-              <div class="story-name" data-story-name></div>
-              <p class="story-text" data-story-text></p>
-              <span class="story-caret is-hidden" data-story-caret>▼</span>
+              <div class="story-face is-hidden" data-story-face></div>
+              <div class="story-main">
+                <div class="story-name" data-story-name></div>
+                <p class="story-text" data-story-text></p>
+                <span class="story-caret is-hidden" data-story-caret>▼</span>
+              </div>
             </div>
           </div>
           <div class="story-choices is-hidden" data-story-choices></div>
@@ -180,6 +226,7 @@ export function playStoryBeat(beat: StoryBeatDef, opts?: StoryPlayOptions): Prom
     host.appendChild(overlay);
 
     const portraitsEl = overlay.querySelector('[data-story-portraits]') as HTMLElement;
+    const faceEl = overlay.querySelector('[data-story-face]') as HTMLElement;
     const nameEl = overlay.querySelector('[data-story-name]') as HTMLElement;
     const textEl = overlay.querySelector('[data-story-text]') as HTMLElement;
     const caretEl = overlay.querySelector('[data-story-caret]') as HTMLElement;
@@ -198,6 +245,24 @@ export function playStoryBeat(beat: StoryBeatDef, opts?: StoryPlayOptions): Prom
     let choiceSeq = 0;
     let portraitSig = '';
     let portraitToken = 0;
+    let faceSig = '';
+
+    /** 换表情图：同角色连续发言不闪切，换人才播淡入 */
+    const setFace = (src: string | null) => {
+      const sig = src ?? '';
+      if (sig === faceSig) return;
+      faceSig = sig;
+      faceEl.classList.remove('is-face-in');
+      if (!src) {
+        faceEl.classList.add('is-hidden');
+        faceEl.innerHTML = '';
+        return;
+      }
+      faceEl.classList.remove('is-hidden');
+      faceEl.innerHTML = `<img src="${texUrl(src)}" alt="" />`;
+      void faceEl.offsetWidth;
+      faceEl.classList.add('is-face-in');
+    };
 
     const finish = (skipped: boolean) => {
       void (async () => {
@@ -211,6 +276,7 @@ export function playStoryBeat(beat: StoryBeatDef, opts?: StoryPlayOptions): Prom
           await sleep(ms);
         }
         overlay.remove();
+        if (beat.bgm) void setBgmTrack(prevBgm);
         resolve({ skipped, choices: choicesLog });
       })();
     };
@@ -322,6 +388,7 @@ export function playStoryBeat(beat: StoryBeatDef, opts?: StoryPlayOptions): Prom
     const playLine = async (line: StoryLine) => {
       await setPortraits(line);
       if (closed) return;
+      setFace(resolveStoryFaceSrc(line));
       const name = speakerName(line);
       nameEl.textContent = name;
       nameEl.classList.toggle('is-hidden', !name);
@@ -346,6 +413,7 @@ export function playStoryBeat(beat: StoryBeatDef, opts?: StoryPlayOptions): Prom
         caretEl.classList.add('is-hidden');
         nameEl.textContent = '指挥官';
         nameEl.classList.remove('is-hidden');
+        setFace(resolveStoryFaceSrc({ kind: 'commander' }));
         void setCommanderPortrait();
         confirmRow.classList.add('is-hidden');
         choicesEl.classList.remove('is-hidden');

@@ -66,13 +66,41 @@ export function stopVoicePlayback(): void {
   setSpeaking(false);
 }
 
+/**
+ * 云端 pitch 会同时改变基频与时长（实测时长 ≈ 原时长 × pitch^-1.85）。
+ * 这里在本地用 playbackRate 把时长拉回目标语速，并用 preservesPitch 保证音高不被二次改变；
+ * 浏览器不支持 preservesPitch 时退化为"只调速不改音高"。
+ */
+export function resolveLocalPlaybackRate(rate: number, pitch: number): number {
+  const p = Math.min(2, Math.max(0.5, pitch || 1));
+  const comp = Math.pow(p, -1.85);
+  const q = (rate || 1) * comp;
+  return Math.min(2, Math.max(0.5, q));
+}
+
+function supportsPreservesPitch(audio: HTMLAudioElement): boolean {
+  return 'preservesPitch' in audio;
+}
+
 /** 播放合成 blob；自动打断上一条 */
-export function playVoiceBlob(blob: Blob): Promise<number> {
+export function playVoiceBlob(
+  blob: Blob,
+  opts?: { rate?: number; pitch?: number },
+): Promise<number> {
   stopVoicePlayback();
   const url = URL.createObjectURL(blob);
   currentUrl = url;
   const audio = new Audio(url);
   audio.preload = 'auto';
+  const pitch = opts?.pitch ?? 1;
+  const rate = opts?.rate ?? 1;
+  if (supportsPreservesPitch(audio)) {
+    (audio as HTMLAudioElement & { preservesPitch: boolean }).preservesPitch = true;
+  }
+  const w = audio as HTMLAudioElement & { webkitPreservesPitch?: boolean };
+  if ('webkitPreservesPitch' in w) w.webkitPreservesPitch = true;
+  // pitch 已在云端生效；这里只把语速调回来（保持音高不变）
+  audio.playbackRate = Math.abs(pitch - 1) < 0.01 ? rate : resolveLocalPlaybackRate(rate, pitch);
   current = audio;
   setSpeaking(true);
   const started = performance.now();

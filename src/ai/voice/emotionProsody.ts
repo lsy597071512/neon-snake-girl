@@ -66,8 +66,11 @@ export function resolveQwenProsody(req: SpeakRequest): QwenTtsParams {
   const ed = EMOTION_DELTA[emotion];
   const td = TYPE_DELTA[lineType];
 
+  // 语速与音量随情绪变化（不改音色）；
+  // 音高固定为角色基线——云端 pitch 是重采样，逐句变音高会让"同一个角色听起来像换了人"，
+  // 这是角色音色跳变的主要来源，所以情绪起伏全部交给 instruction 与语速表达。
   let rate = profile.base.rate + ed.rate * gain + td.rate;
-  let pitch = profile.base.pitch + ed.pitch * gain + td.pitch;
+  const pitch = profile.base.pitch;
   let volume = profile.base.volume + ed.volume * gain + td.volume;
 
   if (req.interruptReaction === 'annoyed') {
@@ -78,16 +81,15 @@ export function resolveQwenProsody(req: SpeakRequest): QwenTtsParams {
     volume += 4;
   }
 
-  // 青年少女向默认不落到粗沉；厚重/略御姐角色可用 pitchFloor 放宽下限
-  const floor =
-    profile.pitchFloor ?? (lineType === 'whisper' ? 1.0 : 1.02);
-  pitch = Math.max(floor, pitch);
-  // 仅当角色显式设了更低 pitchFloor 时，才允许输出低于默认 0.95
-  const pitchMin = profile.pitchFloor != null ? Math.min(profile.pitchFloor, 0.95) : 0.95;
+  // 青年少女向默认不落到粗沉；音高下限只由角色显式 pitchFloor 决定
+  // （不因 whisper 等句型临时抬高，否则同一角色不同句子音高不一致 = 听起来换人）
+  const floor = profile.pitchFloor ?? profile.base.pitch;
+  const finalPitch = Math.max(floor, pitch);
+  const pitchMin = profile.pitchFloor != null ? Math.min(profile.pitchFloor, 0.95) : 0.9;
 
   return {
     rate: clamp(Number(rate.toFixed(2)), 0.7, 1.35),
-    pitch: clamp(Number(pitch.toFixed(2)), pitchMin, 1.25),
+    pitch: clamp(Number(finalPitch.toFixed(2)), pitchMin, 1.25),
     volume: Math.round(clamp(volume, 30, 80)),
   };
 }
@@ -101,13 +103,12 @@ export function buildSpeakInstruction(req: SpeakRequest): string {
   const emotion = normalizeEmotion(req.emotion);
   const lineType = normalizeLineType(req.type);
   // 人设指令固定；情绪只加「语气」一层，避免 instruct 模型每轮重塑音色
-  const parts = [
-    profile.instruction,
-    '整段对话保持同一嗓音身份，不要突然换成熟度、性别感或声线厚度。',
-    `本句语气略偏${EMOTION_CN[emotion]}，但不要换成另一个人。`,
-  ];
+  const parts = [profile.instruction];
   if (lineType === 'whisper') parts.push('音量略轻，仍是同一角色嗓音。');
   if (lineType === 'shout') parts.push('略提高力度，仍保持同一年轻女声身份。');
+  parts.push(`本句语气略偏${EMOTION_CN[emotion]}，但不要换成另一个人。`);
+  // 身份约束放在最后：确保模型以"同一嗓音"收尾，避免逐句重塑音色造成跳变
+  parts.push('整段对话保持同一嗓音身份，不要突然换成熟度、性别感或声线厚度。');
   return parts.join('');
 }
 

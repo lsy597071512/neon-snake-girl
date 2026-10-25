@@ -48,13 +48,94 @@
   -webkit-user-drag: none;
 }
 
+/* 开始页视频状态机：diyici/jinru 与 xunhuan 叠在同一舞台里，靠 titleVideoFx 写入的
+   z-index 决定层叠：loop(1) < diyici(2) < jinru(3)，避免循环视频盖住一次性过场；
+   chuqu 走独立的全屏覆盖层（见下方 .title-video-exit-layer）。 */
+.title-video-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+  /* 透明：视频未就绪/加载失败时露出底下的静态海报作为兜底 */
+  background: transparent;
+}
+
+.title-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center center;
+  opacity: 0;
+  transition: opacity 0.22s ease;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  /* 原生播放键兜底：即使 WebView 忽略伪元素，也把控件层压到不可交互 */
+  background: transparent;
+}
+
+.title-video.is-visible {
+  opacity: 1;
+}
+
+/* 首帧播出前（is-awaiting-play）整只隐藏：此时没有画面，原生大播放键也随之不可见 */
+.title-video.is-awaiting-play {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 入场 / 点击过场播放期间隐藏按钮，避免连点与误触 */
+.title-screen.is-entering .title-footer {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.title-footer {
+  transition: opacity 0.25s ease;
+}
+
+/* chuqu 退场过场：app 级全屏覆盖层（先切页、再盖上去播），避免切页瞬间闪海报 */
+.title-video-exit-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  background: #050608;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.title-video-exit-layer.is-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.title-video-exit-layer .title-video {
+  opacity: 1;
+}
+
+.title-video-exit-layer .title-video.is-awaiting-play {
+  opacity: 0 !important;
+}
+
 .title-veil {
   position: absolute;
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  background:
-    linear-gradient(180deg, rgba(4, 6, 10, 0.18) 0%, transparent 28%, transparent 52%, rgba(4, 6, 10, 0.55) 78%, rgba(4, 6, 10, 0.88) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(4, 6, 10, 0.18) 0%,
+    transparent 28%,
+    transparent 52%,
+    rgba(4, 6, 10, 0.55) 78%,
+    rgba(4, 6, 10, 0.88) 100%
+  );
 }
 
 .title-footer {
@@ -179,6 +260,11 @@
   z-index: 0;
 }
 
+/* 首帧播出前整只隐藏 PV：避免 Android WebView 在暂停封面画大播放键（PV 有声，首次 play 前尤其明显） */
+.world-intro-video.is-awaiting-play {
+  opacity: 0 !important;
+}
+
 .world-intro-art.is-active {
   opacity: 0.55;
   z-index: 0;
@@ -189,15 +275,26 @@
   inset: 0;
   z-index: 1;
   background:
-    radial-gradient(ellipse 80% 60% at 50% 40%, rgba(20, 28, 40, 0.2), transparent 70%),
+    radial-gradient(
+      ellipse 80% 60% at 50% 40%,
+      rgba(20, 28, 40, 0.2),
+      transparent 70%
+    ),
     linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.82) 100%);
   pointer-events: none;
-  transition: opacity 0.35s ease, background 0.35s ease;
+  transition:
+    opacity 0.35s ease,
+    background 0.35s ease;
 }
 
 .world-intro-veil.is-light {
-  background:
-    linear-gradient(180deg, rgba(0, 0, 0, 0.35) 0%, transparent 28%, transparent 72%, rgba(0, 0, 0, 0.45) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.35) 0%,
+    transparent 28%,
+    transparent 72%,
+    rgba(0, 0, 0, 0.45) 100%
+  );
 }
 
 .world-intro-topbar {
@@ -276,7 +373,7 @@
 }
 
 .world-intro-text.is-complete::after {
-  content: '';
+  content: "";
 }
 
 .world-intro-actions {

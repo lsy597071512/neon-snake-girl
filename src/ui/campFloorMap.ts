@@ -70,6 +70,13 @@ function buildPinHtml(agents: CampAgentState[], focusedId: string | null): strin
     .join('');
 }
 
+/** 楼层页签：独立导出，交由营地顶部栏统一网格排布（避免与系统栏各自绝对定位而重叠） */
+export function renderCampFloorTabsHtml(floor: CampFloor): string {
+  const tab = (id: number, label: string) =>
+    `<button type="button" class="camp-floor-tab${floor === id ? ' is-on' : ''}" data-camp-floor="${id}">${label}</button>`;
+  return `<div class="camp-floor-tabs">${tab(1, '一楼')}${tab(2, '二楼')}${tab(-1, '负一楼')}</div>`;
+}
+
 export function renderCampFloorMapHtml(
   living: AiLivingSave,
   ownedIds: string[],
@@ -84,11 +91,6 @@ export function renderCampFloorMapHtml(
 
   return `
     <div class="camp-floor-map" data-camp-floor-map data-floor="${floor}">
-      <div class="camp-floor-tabs">
-        <button type="button" class="camp-floor-tab${floor === 1 ? ' is-on' : ''}" data-camp-floor="1">一楼</button>
-        <button type="button" class="camp-floor-tab${floor === 2 ? ' is-on' : ''}" data-camp-floor="2">二楼</button>
-        <button type="button" class="camp-floor-tab${floor === -1 ? ' is-on' : ''}" data-camp-floor="-1">负一楼</button>
-      </div>
       <div class="camp-floor-stage" data-camp-floor-viewport>
         <div class="camp-floor-pan" data-camp-floor-pan>
           <img class="camp-floor-bg" src="${mapSrc}" alt="营地${floor === -1 ? '负一' : floor}楼平面" draggable="false" data-camp-floor-bg />

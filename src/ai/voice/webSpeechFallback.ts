@@ -14,15 +14,22 @@ export function canUseWebSpeechFallback(): boolean {
   return !!synth && typeof SpeechSynthesisUtterance !== 'undefined';
 }
 
+/**
+ * 系统朗读音色全局固定一个：系统语音列表加载顺序可能变化，
+ * 每次重新挑选会出现"同一角色这句和上句不是同一个人"的感觉。
+ */
+let cachedSystemVoice: SpeechSynthesisVoice | null = null;
+
 function pickZhVoice(synth: SpeechSynthesis): SpeechSynthesisVoice | null {
+  if (cachedSystemVoice) return cachedSystemVoice;
   const voices = synth.getVoices();
   if (!voices.length) return null;
-  return (
+  cachedSystemVoice =
     voices.find((v) => /^zh(-|_|$)/i.test(v.lang) && /female|xiaoxiao|huihui|ting|yaoyao/i.test(v.name)) ||
     voices.find((v) => /^zh-CN/i.test(v.lang)) ||
     voices.find((v) => /^zh/i.test(v.lang)) ||
-    null
-  );
+    null;
+  return cachedSystemVoice;
 }
 
 /** 等待 voiceschanged（部分 WebView 首次 getVoices 为空） */

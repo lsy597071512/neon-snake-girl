@@ -3,23 +3,29 @@
  * 禁止同一拍里「等我去换」又「已经换好」，也禁止情绪/场景同步把刚换上的衣服扒掉。
  */
 import {
+  BATH_SOLO_SKIN_ID,
   CASUAL_FASHION_SKIN_ID,
   getCharacterSkin,
   getCharacterSkins,
+  isAloneBathSkinId,
   isOutfitChangeProcessSkin,
   LIFEWEAR_SKIN_ID,
   OUTFIT_CHANGE_SKIN_ID,
   OUTFIT_CHANGE_SKIN_NAME,
   POOL_PARTY_SKIN_ID,
+  resolveAloneBathSkinId,
   SHOWER_SKIN_ID,
   SLEEPWEAR_SKIN_ID,
   SPECIAL_DARE_SKIN_ID,
+  XIEJIA_SKIN_ID,
 } from '../data/characterSkins';
 import { CHARACTER_MAP } from '../data/characters';
 import type { SaveData } from '../types';
 import { applyAiSkinChange } from './aiSkinChange';
 import { preloadSkinAssets } from './assetPreload';
+import { buildXiejiaPromptNote } from './xiejiaSkin';
 import { getCampDisplaySkinId, getCampLogicalSkinId, hasCampSkinAsset } from './campOutfit';
+import { isDanceActiveFor } from './danceSession';
 import type { AiLivingSave, LlmDialogueResult, OutfitNarrativeHold, OutfitWearLock, PendingOutfitChange } from './types';
 
 const CHANGE_DELAY_MS = 7200;
@@ -41,6 +47,15 @@ export function declinesOutfitChange(dialogue: string, action?: string): boolean
   return REFUSE_OUTFIT_RE.test(mouth);
 }
 
+/**
+ * 安抚室事件占用立绘期间：禁止一切换装排队/落装（安抚三相皮由会话唯一持有）。
+ * 直接读 living.anfuSession，避免与 anfuSession 形成相互 import。
+ */
+function anfuHoldsOutfit(living: AiLivingSave, characterId: string): boolean {
+  const s = living.anfuSession;
+  return Boolean(s?.active && s.characterId === characterId);
+}
+
 export function cancelPendingOutfitChange(living: AiLivingSave, characterId: string): void {
   const { pendingOutfitChanges } = ensureOutfitChangeFields(living);
   delete pendingOutfitChanges[characterId];
@@ -51,7 +66,7 @@ export function cancelPendingOutfitChange(living: AiLivingSave, characterId: str
 
 /** 玩家/对白是否在谈换装（对话引擎门闸与本地钳共用） */
 export const OUTFIT_SPEECH_RE =
-  /换(上|好|完|衣|装|服|一?[套件])|去换|我去换|私服|泳装|睡衣|特殊服装|性感|情趣|那套|这套衣服/;
+  /换(上|好|完|衣|装|服|一?[套件])|去换|我去换|私服|泳装|睡衣|特殊服装|性感|情趣|卸甲|轻装坦诚|那套|这套衣服/;
 
 /**
  * 换装「中间过程」叙事：拉链卡住 / 正在脱 / 还在换 / 折腾衣服…
@@ -120,8 +135,9 @@ export function getPendingOutfitChange(
   return pendingOutfitChanges[characterId] ?? null;
 }
 
-/** 换装进行中 / 展示锁定期 / 叙事换装锁：禁止自动扒皮/情绪选装与房间对齐瞬切 */
+/** 换装进行中 / 展示锁定期 / 叙事换装锁 / 独占事件（舞蹈·安抚）中：禁止自动扒皮/情绪选装与房间对齐瞬切 */
 export function shouldHoldAutoOutfit(living: AiLivingSave, characterId: string): boolean {
+  if (isDanceActiveFor(living, characterId)) return true;
   const { pendingOutfitChanges, outfitWearLocks } = ensureOutfitChangeFields(living);
   const pending = pendingOutfitChanges[characterId];
   if (pending?.phase === 'changing') return true;
@@ -180,10 +196,13 @@ export function normalizeSkinChangeWant(characterId: string, raw: string): strin
   if (/生活服装|居家|日常休闲|营地休闲/.test(t)) return LIFEWEAR_SKIN_ID;
   if (/泳装|泳衣|泳池/.test(t)) return POOL_PARTY_SKIN_ID;
   if (/睡衣|星夜/.test(t)) return SLEEPWEAR_SKIN_ID;
-  if (/毛巾|浴巾|冲澡|蒸汽/.test(t)) return SHOWER_SKIN_ID;
+  if (/独自泡澡|泡澡|独浴/.test(t)) return resolveAloneBathSkinId(characterId) ?? BATH_SOLO_SKIN_ID;
+  if (/毛巾|浴巾|冲澡|蒸汽/.test(t)) return resolveAloneBathSkinId(characterId) ?? SHOWER_SKIN_ID;
   if (/私服|休闲|便服|街拍|都市/.test(t)) return CASUAL_FASHION_SKIN_ID;
-  // pifu05 = 情趣调情造型；小黑屋/调教惩罚是事件，不映射本皮
-  if (/特殊服装|调情|色诱|挑逗|情趣|勾引|性暗示|性感|pifu05/.test(t)) return SPECIAL_DARE_SKIN_ID;
+  // pifu05 = 情趣个性造型；事件皮不映射本皮
+  if (/特殊服装|调情|撩拨|展示身材|个性|时尚|造型|pifu05/.test(t)) return SPECIAL_DARE_SKIN_ID;
+  // 卸甲（轻装坦诚）：玩家请求 + 角色同意后穿着
+  if (/卸甲|轻装坦诚|卸下外装|卸掉外装/.test(t)) return XIEJIA_SKIN_ID;
 
   for (const skin of getCharacterSkins(characterId)) {
     if (skin.name && t.includes(skin.name.toLowerCase())) return skin.id;
@@ -197,9 +216,12 @@ function inferWantFromSpeech(characterId: string, text: string): string | null {
   if (/私服|休闲装|便服|街拍/.test(text)) return CASUAL_FASHION_SKIN_ID;
   if (/泳装|泳衣/.test(text)) return POOL_PARTY_SKIN_ID;
   if (/睡衣/.test(text)) return SLEEPWEAR_SKIN_ID;
-  if (/毛巾|浴巾/.test(text)) return SHOWER_SKIN_ID;
-  // 「性感/情趣/特殊服装01」等 → pifu05；裸「去换」由 process 侧默认同套
-  if (/特殊服装|性感|情趣|挑逗|色诱|少穿一点|骚/.test(text)) return SPECIAL_DARE_SKIN_ID;
+  if (/独自泡澡|泡澡/.test(text)) return resolveAloneBathSkinId(characterId) ?? BATH_SOLO_SKIN_ID;
+  if (/毛巾|浴巾|冲澡/.test(text)) return resolveAloneBathSkinId(characterId) ?? SHOWER_SKIN_ID;
+  // 「调情/展示身材/特殊服装01」等 → pifu05
+  if (/特殊服装|调情|撩拨|展示身材|个性|时尚|造型/.test(text)) return SPECIAL_DARE_SKIN_ID;
+  // 卸甲（轻装坦诚）→ wuziqi
+  if (/卸甲|轻装坦诚|卸下外装|卸掉外装/.test(text)) return XIEJIA_SKIN_ID;
   if (/原皮|默认装甲|换回去|换回来|战斗装甲|装甲/.test(text)) return 'default';
   return null;
 }
@@ -228,6 +250,10 @@ export function schedulePresenceOutfitChange(
   delayMs = CHANGE_DELAY_MS,
 ): { queued: boolean; msg: string } {
   const { pendingOutfitChanges } = ensureOutfitChangeFields(living);
+  if (anfuHoldsOutfit(living, characterId)) {
+    delete pendingOutfitChanges[characterId];
+    return { queued: false, msg: '' };
+  }
   const target = want ?? 'default';
   const cur = logicalSkinMeta(living, characterId);
   const targetId = target === 'default' ? null : target;
@@ -247,6 +273,56 @@ export function schedulePresenceOutfitChange(
     queued: true,
     msg: `开始换「${q.targetName}」（立绘切${OUTFIT_CHANGE_SKIN_NAME}，约 ${Math.round(delayMs / 1000)} 秒）`,
   };
+}
+
+/**
+ * 事件临时外覆的「带过程」换装：先播换装过程皮，到点才把临时皮挂上。
+ * 用于营地群体事件自动换装、洗浴毛巾/泡澡等（禁止瞬间切皮）。
+ * 已穿着目标皮或已在排队同一目标时幂等返回（tick 反复调用安全）。
+ */
+export function scheduleEventTempSkinChange(
+  living: AiLivingSave,
+  characterId: string,
+  skinId: string,
+  eventInstanceId: string,
+  delayMs = 2_600,
+): { queued: boolean; msg: string } {
+  if (anfuHoldsOutfit(living, characterId)) return { queued: false, msg: '' };
+  if (!getCharacterSkin(characterId, skinId)) return { queued: false, msg: '' };
+  const currentTemp = living.eventTempSkins?.[characterId];
+  if (currentTemp?.skinId === skinId && currentTemp.eventInstanceId === eventInstanceId) {
+    return { queued: false, msg: '' };
+  }
+  const pending = living.pendingOutfitChanges?.[characterId];
+  if (
+    pending?.phase === 'changing' &&
+    pending.targetSkinId === skinId &&
+    pending.applyAsTempInstanceId === eventInstanceId
+  ) {
+    return { queued: false, msg: '' };
+  }
+  const q = queueChanging(living, characterId, skinId, delayMs);
+  const next = living.pendingOutfitChanges?.[characterId];
+  if (next) next.applyAsTempInstanceId = eventInstanceId;
+  return { queued: true, msg: `开始换「${q.targetName}」（事件临时外覆，立绘切${OUTFIT_CHANGE_SKIN_NAME}）` };
+}
+
+/**
+ * 强制排队一次换装（即使目标与当前账本一致）。
+ * 用于「事件散场」：舞蹈/安抚结束后先播换装过程皮，再回日常服，
+ * 保证任何换皮都有可见的换衣过程，而不是瞬间硬切。
+ */
+export function forceScheduleOutfitChange(
+  living: AiLivingSave,
+  characterId: string,
+  want: string | null,
+  delayMs = CHANGE_DELAY_MS,
+): { queued: boolean; msg: string } {
+  if (anfuHoldsOutfit(living, characterId)) {
+    return { queued: false, msg: '' };
+  }
+  const q = queueChanging(living, characterId, want ?? 'default', delayMs);
+  return { queued: true, msg: `开始换「${q.targetName}」（立绘切${OUTFIT_CHANGE_SKIN_NAME}）` };
 }
 
 function queueChanging(
@@ -284,13 +360,41 @@ export function applyPendingOutfitChangeNow(
   characterId: string,
 ): { applied: boolean; msg: string } {
   const { pendingOutfitChanges } = ensureOutfitChangeFields(living);
+  if (anfuHoldsOutfit(living, characterId)) {
+    delete pendingOutfitChanges[characterId];
+    return { applied: false, msg: '' };
+  }
   const pending = pendingOutfitChanges[characterId];
   if (!pending) return { applied: false, msg: '' };
   const want = pending.targetSkinId ?? 'default';
+
+  // 事件临时外覆：到点后只写临时层（不碰日常穿搭），保证"先换衣再显形"
+  if (pending.applyAsTempInstanceId) {
+    const instanceId = pending.applyAsTempInstanceId;
+    const targetId = pending.targetSkinId;
+    if (!targetId || !getCharacterSkin(characterId, targetId)) {
+      delete pendingOutfitChanges[characterId];
+      return { applied: false, msg: '' };
+    }
+    if (!living.eventTempSkins) living.eventTempSkins = {};
+    const cur = living.eventTempSkins[characterId];
+    living.eventTempSkins[characterId] = {
+      skinId: targetId,
+      restoreSkinId: cur?.restoreSkinId ?? getCampLogicalSkinId(living, characterId),
+      eventInstanceId: instanceId,
+    };
+    delete pendingOutfitChanges[characterId];
+    return {
+      applied: true,
+      msg: `已换上「${getCharacterSkin(characterId, targetId)?.name ?? targetId}」（事件临时外覆）`,
+    };
+  }
+
   const r = applyAiSkinChange(save, living, characterId, want);
   if (r.ok) {
     delete pendingOutfitChanges[characterId];
-    setWearLock(living, characterId, pending.targetSkinId);
+    // 回营地日常基准不算「展示新衣」：不挂展示锁，否则刚脱下的装甲会连带锁住后续换装
+    if (pending.targetSkinId) setWearLock(living, characterId, pending.targetSkinId);
   }
   return { applied: r.ok, msg: r.msg };
 }
@@ -320,17 +424,20 @@ export function buildOutfitChangePromptBlock(
 
   const protocol = `【换装协议·由你驱动】换衣服是你的行为，游戏只会同步玩家眼前立绘，不会替你编台词。
 1) 营地默认穿「生活服装」(pifu00)。指挥官要看某套衣服、或你自己想换：本轮 dialogue 只说「等我去换/稍等」，action 写去衣柜或整理换衣布；skin_change 填目标 id（pifu00 生活服装 / pifu01 泳装 / pifu02 睡衣 / pifu04 都市私服 / pifu05 特殊服装 / default 战斗装甲）；want_continue=false。
-   默认战斗装甲(default)仅在：你主动想穿、室外干活、军械库/执勤/战斗相关时使用；其它时候不要切装甲，日常回 pifu00。
-   想调情、捉弄、展示情趣造型、勾引/色诱/性暗示、邀请身体接触时，优先 pifu05。
-   「小黑屋/调教室/惩罚调教」是事件状态，不是换 pifu05。禁止 skin_change=huanzhuang（过程皮由系统自动播）。
-2) 系统还没通知「换装完成」前，立绘是「换装中」过程动态（遮布/衣柜），不是目标外覆。禁止说已经换好、禁止评价/展示新衣服。
-3) 收到【世界同步·换装完成】后，才按新衣服说话。
-4) 谈及衣装只能描述「玩家眼前立绘」那一套。skin_change 是「开始去换」的意向。当前外覆若有 _1/_2/_3，可用 skin_clip=1…N；禁止跨套。营地穿搭不依赖购买。`;
+   默认战斗装甲(default)仅在：军械库/炮塔等执勤点检、或你正在战斗相关岗上时才用；其它时候一律日常 pifu00，不要切装甲。营地装甲占比必须很低。
+   想调情、撩拨、展示身材、俏皮展示个性造型时，优先 pifu05。
+   事件专属皮由系统管理，不是换 pifu05。禁止 skin_change=huanzhuang（过程皮由系统自动播）。
+2) 「卸甲」(id=wuziqi)：轻装坦诚外覆，只在指挥官开口请求且你愿意时穿（不可主动提议）；仅限大厅或房间、且你未参与任何事件。穿上后表现羞涩尴尬，一律用含蓄说法（卸下外装/轻装坦诚/用手臂挡着）；随时可正常换回，没有时间限制。
+3) 系统还没通知「换装完成」前，立绘是「换装中」过程动态（遮布/衣柜），不是目标外覆。禁止说已经换好、禁止评价/展示新衣服。
+4) 收到【世界同步·换装完成】后，才按新衣服说话。
+5) 谈及衣装只能描述「玩家眼前立绘」那一套。skin_change 是「开始去换」的意向。当前外覆若有 _1/_2/_3，可用 skin_clip=1…N；禁止跨套。营地穿搭不依赖购买。`;
+  const xiejiaNote = buildXiejiaPromptNote(living, characterId);
 
   if (pending?.phase === 'changing') {
     const leftSec = Math.max(1, Math.ceil((pending.readyAtMs - Date.now()) / 1000));
     const live = changingLiveNote(characterId);
     return `${protocol}
+${xiejiaNote}
 
 【世界同步·衣装状态=正在换衣服】
 - 玩家眼前立绘（唯一真相）：「${OUTFIT_CHANGE_SKIN_NAME}」过程动态（不是「${pending.fromSkinName}」定装，也不是「${pending.targetName}」）
@@ -342,6 +449,7 @@ export function buildOutfitChangePromptBlock(
 
   if (locked) {
     return `${protocol}
+${xiejiaNote}
 
 【世界同步·衣装状态=已穿上展示中】
 - 玩家眼前立绘（唯一真相）：「${cur.name}」
@@ -350,6 +458,7 @@ export function buildOutfitChangePromptBlock(
   }
 
   return `${protocol}
+${xiejiaNote}
 
 【世界同步·衣装状态=日常穿着】
 - 玩家眼前立绘（唯一真相）：「${cur.name}」`;
@@ -401,6 +510,10 @@ export function processTurnOutfitChange(
   opts: ProcessOpts,
 ): { pending: boolean; applied: boolean; suppressContinue: boolean; msg: string } {
   const { pendingOutfitChanges } = ensureOutfitChangeFields(living);
+  if (anfuHoldsOutfit(living, characterId)) {
+    delete pendingOutfitChanges[characterId];
+    return { pending: false, applied: false, suppressContinue: false, msg: '' };
+  }
   const playerMsg = opts.playerMessage?.startsWith('【系统') ? '' : opts.playerMessage;
   const mouth = `${opts.dialogue} ${opts.action ?? ''}`;
   const speech = `${mouth} ${opts.inner_thought ?? ''} ${playerMsg ?? ''}`;
@@ -438,9 +551,9 @@ export function processTurnOutfitChange(
     holdOutfitForNarrative(living, characterId, opts.dialogue.slice(0, 40));
   }
 
-  // 浴室毛巾：场景安全，仍瞬时
-  if (want === SHOWER_SKIN_ID) {
-    const r = applyAiSkinChange(save, living, characterId, want);
+  // 独自洗浴皮：场景安全，仍瞬时
+  if (isAloneBathSkinId(want)) {
+    const r = applyAiSkinChange(save, living, characterId, want!);
     delete pendingOutfitChanges[characterId];
     return { pending: false, applied: r.ok, suppressContinue: false, msg: r.msg };
   }

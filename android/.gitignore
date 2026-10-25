@@ -53,9 +53,15 @@ captures/
 .idea/navEditor.xml
 
 # Keystore files
-# Uncomment the following lines if you do not want to check your keystore files in.
-#*.jks
-#*.keystore
+# 签名私钥与密码绝不入库（丢了也无法覆盖安装给玩家）。
+# 备份到私有网盘/私有仓库，换电脑时手动取回并运行 scripts/android-signing-init.ps1
+*.jks
+*.keystore
+keystore/*
+!keystore/README.md
+key.properties
+key.properties.bak
+!.keystore.md
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild

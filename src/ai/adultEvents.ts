@@ -1,8 +1,8 @@
 /**
- * 成人事件总包装：把「浴室亲密 / 脱浴巾」与「小黑屋调教」并入同一成人事件层，
- * 并挂载身体敏感点（bodySensitivity）。
+ * 亲密氛围总包装：把「浴室亲近 / 解巾」等并入同一亲密氛围层，
+ * 并挂载亲近区（bodySensitivity）。
  *
- * 底层会话机仍由 bathIntimateConsent / disciplineSession 驱动；
+ * 底层会话机仍由 bathIntimateConsent 等驱动；
  * 本模块负责：场景判定、Prompt 统一门闩、刺激字段解析与落盘。
  */
 import type { AiLivingSave } from './types';
@@ -22,11 +22,14 @@ import {
   isBathIntimateDialogueContext,
   isBathingForIntimateConsent,
 } from './bathIntimateConsent';
+import { getBathAssistSession, isBathAssistActiveFor } from './bathAssistSession';
 import { isDisciplineActiveFor } from './disciplineSession';
 
-/** 成人事件场景标签（Prompt / 日志用） */
+/** 亲密氛围场景标签（Prompt / 日志用） */
 export type AdultEventScene =
   | 'bath_intimate'
+  | 'bath_help_wash'
+  | 'bath_co_bath'
   | 'discipline'
   | 'discipline_commander'
   | 'adult_dialogue'
@@ -34,27 +37,27 @@ export type AdultEventScene =
 
 export type AdultEventContext = {
   scene: AdultEventScene;
-  /** 是否应注入敏感点 + 成人字段 */
+  /** 是否应注入亲近区字段 */
   active: boolean;
   reasons: string[];
 };
 
 const ADULT_TOPIC_RE =
-  /(成人|色情|性爱|做爱|性交|口交|手交|足交|自慰|高潮|射精|精液|机油|敏感液|敏感点|乳头|阴道|会阴|小管道|脱浴巾|一起洗澡|共浴|调教|小黑屋|捆绑|道具|刺激|爱抚|揉胸|舔|插入)/i;
+  /(亲密|暧昧|调情|撩|贴近|解巾|浴巾|共浴|一起洗|敏感|心跳|脸颊发热|拥抱|牵着|靠肩|耳语|气息)/i;
 
-/** 角色主导刺激指挥官（小管道等） */
+/** 角色主导的亲近/撩拨 */
 const GIRL_LEADS_CMD_RE =
-  /(调教(你|指挥官)|玩(你|指挥官)|摸(你的)?小管道|刺激(你的)?管道|帮(你|指挥官).{0,8}(射|排|泄)|给你.{0,6}(手活|口)|骑(上|着)(你|指挥官))/i;
+  /(逗(你|指挥官)|撩(你|指挥官)|调情|贴近(你|指挥官)|靠(向|近)(你|指挥官)|牵着(你|指挥官))/i;
 
 /**
- * 判定本轮是否处在成人事件上下文（浴室亲密 / 调教 / 成人话题对话）。
+ * 判定本轮是否处在亲密氛围上下文（浴室亲近 / 暧昧话题对话）。
  */
 export function detectAdultEventContext(opts: {
   living: AiLivingSave;
   characterId: string;
   userText?: string;
   assistantText?: string;
-  /** 用户明确点了成人话题或敏感描写 */
+  /** 用户明确点了暧昧话题或亲近描写 */
   forceAdultTopic?: boolean;
 }): AdultEventContext {
   const { living, characterId, userText = '', assistantText = '', forceAdultTopic } = opts;
@@ -64,10 +67,14 @@ export function detectAdultEventContext(opts: {
   const bathing = isBathingForIntimateConsent(living, characterId);
   const intimateOn = getBathIntimateConsent(living, characterId);
   const bathSpeech = isBathIntimateDialogueContext(userText, assistantText);
-  if (bathing && (intimateOn || bathSpeech || /脱浴巾|拿开浴巾|脱掉.*巾/.test(userText))) {
+  const assist = getBathAssistSession(living);
+  if (assist?.active && assist.characterId === characterId) {
+    scene = assist.mode === 'help_wash' ? 'bath_help_wash' : 'bath_co_bath';
+    reasons.push(assist.mode === 'help_wash' ? '帮指挥官清洗中' : '一同泡澡中');
+  } else if (bathing && (intimateOn || bathSpeech || /解浴巾|拿开浴巾|解下.*巾/.test(userText))) {
     scene = 'bath_intimate';
     reasons.push(
-      intimateOn ? '浴室已脱巾亲密' : bathSpeech ? '浴室亲密对白' : '浴室脱巾话题',
+      intimateOn ? '浴室已解巾亲近' : bathSpeech ? '浴室亲密对白' : '浴室解巾话题',
     );
   }
 
@@ -75,13 +82,13 @@ export function detectAdultEventContext(opts: {
     const blob = `${userText}\n${assistantText}`;
     const girlLeads = GIRL_LEADS_CMD_RE.test(blob);
     scene = girlLeads ? 'discipline_commander' : 'discipline';
-    reasons.push(girlLeads ? '小黑屋·角色调教指挥官' : '小黑屋调教');
+    reasons.push(girlLeads ? '角色主动亲近' : '亲近氛围');
   }
 
   const blob = `${userText}\n${assistantText}`;
   if (forceAdultTopic || ADULT_TOPIC_RE.test(blob)) {
     if (scene === 'none') scene = 'adult_dialogue';
-    reasons.push('成人话题/敏感描写触发');
+    reasons.push('亲密话题/亲近描写触发');
   }
 
   return {
@@ -91,25 +98,29 @@ export function detectAdultEventContext(opts: {
   };
 }
 
-/** 成人事件总则（短）：与浴室/调教细则叠加，不替代后者 */
+/** 亲密氛围总则（短）：与浴室细则叠加，不替代后者 */
 export function buildAdultEventPreamble(scene: AdultEventScene): string {
   const sceneLine =
     scene === 'bath_intimate'
-      ? '当前成人事件：浴室共同洗澡 / 脱浴巾亲密。遵循浴室同意链；敏感点描写要贴合湿热与肌肤接触。'
-      : scene === 'discipline'
-        ? '当前成人事件：小黑屋调教（指挥官主导）。遵循调教会话与纪律；敏感点与异样情绪要写进动作与身体反应。'
+      ? '当前亲密氛围：共浴 / 解巾后的亲近。遵循浴室同意链；可写湿热、水汽、心跳与贴近的张力，点到即止。'
+      : scene === 'bath_help_wash'
+        ? '当前亲密氛围：帮指挥官清洗。你在冲淋/搓洗指挥官；描写贴合湿热与手部动作。'
+        : scene === 'bath_co_bath'
+          ? '当前亲密氛围：一同泡澡。共浴湿热与贴近；以氛围和情绪为主。'
+          : scene === 'discipline'
+        ? '当前场景：安静室内的陪伴氛围。'
         : scene === 'discipline_commander'
-          ? '当前成人事件：小黑屋调教（你调教指挥官）。可刺激指挥官「小管道」；其排出机油=敏感液高潮信号。'
-          : '当前成人事件：成人话题对话。可自然推进爱抚/刺激，但须角色声线；无同意勿跳过界。';
+          ? '当前场景：角色主动引导的陪伴氛围。'
+          : '当前亲密氛围：暧昧话题对话。可主动调情、撩拨、展示身材，但须贴合角色声线，点到即止、留白为妙。';
 
   return [
-    '【成人事件】脱浴巾亲密与小黑屋调教同属成人事件层；身体敏感点在本层生效。',
+    '【亲密氛围】解巾后的亲近、帮洗/共浴同属亲密氛围层；以情绪与氛围为主，描写点到即止。',
     sceneLine,
-    '异样情绪与调教复杂情绪同源，可矛盾并存；长刺激或高潮可排出机油（敏感液）。',
+    '情绪起伏与复杂心思可矛盾并存；含蓄处理，不做露骨描写。',
   ].join('\n');
 }
 
-/** 拼进 system/user 动态块：成人事件 + 敏感点快照 */
+/** 拼进 system/user 动态块：亲密氛围 + 亲近区快照 */
 export function buildAdultEventPromptBlock(opts: {
   living: AiLivingSave;
   characterId: string;
@@ -134,7 +145,7 @@ export type AdultLlmStimFields = {
 };
 
 /**
- * 从 LLM 扁平字段应用身体刺激；非成人上下文则衰减。
+ * 从 LLM 扁平字段应用亲近刺激；非亲密上下文则衰减。
  */
 export function applyAdultEventFromLlm(opts: {
   living: AiLivingSave;
@@ -166,7 +177,7 @@ export function applyAdultEventFromLlm(opts: {
     living,
     characterId,
     {
-      target: target ?? (zones.includes('commander_pipe') ? 'commander' : 'self'),
+      target: target ?? (zones.includes('commander_core') ? 'commander' : 'self'),
       zones,
       intensity: parseStimIntensity(fields.stim_intensity),
       duration: parseStimDuration(fields.stim_duration),

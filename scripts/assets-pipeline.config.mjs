@@ -6,7 +6,7 @@
 import path from 'node:path';
 
 /** 策略版本：变更规格时必须递增，使 ship 缓存失效并重压 */
-export const SHIP_POLICY_VERSION = '2026-09-06-p2-mobile-v3.3-bug5-bug6-bug7-unref';
+export const SHIP_POLICY_VERSION = '2026-09-20-p2-mobile-v3.4-drop-juese-mp4';
 
 /** @typedef {{ maxLongEdge: number, quality: number, alphaQuality?: number, matte?: 'edge' | null }} WebpSpec */
 /** @typedef {{ maxWidth: number, crf: number, preset?: string }} VideoSpec */
@@ -151,12 +151,25 @@ export function shouldTranscodeVideo(rel) {
   const r = normRelPath(rel);
   if (/^storyboards\//i.test(r)) return true;
   const base = path.basename(r).toLowerCase();
-  if (base === 'beijing01.mp4' || base === 'shop.mp4' || base === 'pv_720p.mp4') return true;
+  if (
+    base === 'beijing01.mp4' ||
+    base === 'shop.mp4' ||
+    base === 'pv_720p.mp4' ||
+    base === 'pv_20261024.mp4' ||
+    base === 'juesechoukajiemian.mp4' ||
+    base === 'juesechoukajiemian_dong.mp4' ||
+    // 开始页入场/循环/点击/退场过场动画（P0 首屏，需转码去音轨以保证无缝静音）
+    base === 'diyici.mp4' ||
+    base === 'jinru.mp4' ||
+    base === 'xunhuan.mp4' ||
+    base === 'chuqu.mp4'
+  )
+    return true;
   return false;
 }
 
-/** 需要保留音轨的视频（白名单）：世界观 PV、商店开箱动画 */
-const VIDEO_KEEP_AUDIO = new Set(['pv_720p.mp4', 'shop.mp4']);
+/** 需要保留音轨的视频（白名单）：世界观 PV、商店开箱动画、抽卡召唤动画（开始页过场去音轨） */
+const VIDEO_KEEP_AUDIO = new Set(['pv_720p.mp4', 'pv_20261024.mp4', 'shop.mp4', 'juesechoukajiemian_dong.mp4']);
 
 /** 白名单视频保留音轨；其余环境视频仍去音轨 */
 export function shouldPreserveVideoAudio(rel) {

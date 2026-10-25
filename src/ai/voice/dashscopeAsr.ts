@@ -1,4 +1,5 @@
 import { getStoredApiKey } from '../llmClient';
+import { fetchDashscope } from '../dashscopeFailover';
 
 const ASR_CHAT_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 const ASR_MM_URL =
@@ -78,7 +79,7 @@ export async function recognizeWithDashScope(
 
   // 1) OpenAI 兼容接口（与现有对话同域名）
   try {
-    const res = await fetch(ASR_CHAT_URL, {
+    const res = await fetchDashscope(ASR_CHAT_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -119,7 +120,7 @@ export async function recognizeWithDashScope(
   if (opts.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
   // 2) 多模态 generation 兜底
-  const res2 = await fetch(ASR_MM_URL, {
+  const res2 = await fetchDashscope(ASR_MM_URL, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,

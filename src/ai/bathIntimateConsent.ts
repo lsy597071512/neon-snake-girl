@@ -1,13 +1,16 @@
 /**
- * 营地洗浴成人互动：冲澡动态立绘门控。
- * 浴室常态 = 冲澡待机（*_pifu03_idle.webm，裹浴巾）。
- * 成人动态（*_pifu03.webm）仅当「主动脱掉浴巾」：
+ * 营地洗浴成人互动：独自泡澡/冲澡动态立绘门控。
+ * 浴室常态 = 独自泡澡裹巾（pifu09 `_solo.webm`，无则 pifu03 idle）。
+ * 成人动态（`_solo_1.webm` / pifu03 intimate）仅当「主动脱掉浴巾」：
  *   - 指挥官明确要求脱掉浴巾 / 拿开浴巾，且角色同意；或
  *   - 角色自愿脱掉浴巾。
  * 角色改口重新裹上浴巾 → 立刻回待机动态。
  * 「一起洗 / 搓背」 alone 不足以触发成人立绘（仍可裹巾同浴）。
+ * 共浴(pifu08)进行中本门控改驱动共浴 clip2，不切独自泡澡 intimate。
  */
+import { isAloneBathSkinId } from '../data/characterSkins';
 import { getAgenda, isAgendaActive } from './characterAgenda';
+import { getCampDisplaySkinId, getCampLogicalSkinId } from './campOutfit';
 import { resolvePresence } from './livingState';
 import type { AiLivingSave } from './types';
 
@@ -16,8 +19,14 @@ export function isBathingForIntimateConsent(
   characterId: string,
 ): boolean {
   const presence = resolvePresence(characterId, living);
-  if (presence.roomId !== 'room_1f_bath') return false;
-  if (presence.activity === 'bathe') return true;
+  const anchor = living.bodyAnchors?.[characterId];
+  const scene = living.dialogueTurnScene?.[characterId];
+  const inBathRoom =
+    presence.roomId === 'room_1f_bath' ||
+    anchor?.roomId === 'room_1f_bath' ||
+    scene?.roomId === 'room_1f_bath';
+  if (!inBathRoom) return false;
+  if (presence.activity === 'bathe' || anchor?.activity === 'bathe') return true;
   const agenda = getAgenda(living, characterId);
   if (agenda && isAgendaActive(agenda)) {
     if (agenda.activity === 'bathe' && agenda.targetRoomId === 'room_1f_bath') return true;
@@ -25,7 +34,9 @@ export function isBathingForIntimateConsent(
   }
   const snap = living.dialogueTurnScene?.[characterId];
   if (snap?.roomId === 'room_1f_bath') return true;
-  return true;
+  // No room evidence means the character is not bathing. Returning true here
+  // leaks the temporary bath skin into the hall during ordinary dialogue.
+  return false;
 }
 
 export function getBathIntimateConsent(
@@ -124,12 +135,47 @@ export function parseBathIntimateConsentField(raw: unknown): boolean | undefined
 }
 
 /** 指挥官明确要求「脱掉浴巾」类（不含单纯一起洗/搓背） */
-const PLAYER_ASKS_UNDRESS =
+export const PLAYER_ASKS_UNDRESS =
   /脱(?:下|掉|了)?(?:你的|妳的)?(?:浴巾|毛巾)|(?:浴巾|毛巾).{0,6}(?:脱|解|拿开|扯)|解开.{0,4}(?:浴巾|毛巾)|拿开.{0,4}(?:浴巾|毛巾)|别裹(?:着)?(?:了)?|不要裹|让我看(?:看)?(?:你|妳)?(?:的)?身子|把浴巾.{0,4}(?:拿|扯|解)/;
+
+/** 聊天记录可见：独自泡澡时指挥官口头/按钮请求脱巾（无字段名；与语音等效） */
+export function buildSoloBathUndressPlayerMessage(): string {
+  return '把浴巾脱下来好不好？我想看看你。';
+}
+
+/** 聊天记录可见：请角色重新裹巾 */
+export function buildSoloBathWrapPlayerMessage(): string {
+  return '把浴巾重新裹上吧。';
+}
+
+/** 独自泡澡（pifu09/03）且可脱巾时，显示「脱下浴巾」按钮；已脱巾则无效 */
+export function canShowSoloBathUndressButton(
+  living: AiLivingSave,
+  characterId: string,
+): boolean {
+  const assist = living.bathAssistSession;
+  if (assist?.active && assist.characterId === characterId) return false;
+  if (!isBathingForIntimateConsent(living, characterId)) return false;
+  if (!isAloneBathSkinId(getCampDisplaySkinId(living, characterId) ?? getCampLogicalSkinId(living, characterId))) return false;
+  if (getBathIntimateConsent(living, characterId)) return false;
+  return true;
+}
+
+/** 已脱巾时可显示「裹上浴巾」 */
+export function canShowSoloBathWrapButton(
+  living: AiLivingSave,
+  characterId: string,
+): boolean {
+  const assist = living.bathAssistSession;
+  if (assist?.active && assist.characterId === characterId) return false;
+  if (!isBathingForIntimateConsent(living, characterId)) return false;
+  if (!isAloneBathSkinId(getCampLogicalSkinId(living, characterId))) return false;
+  return getBathIntimateConsent(living, characterId);
+}
 
 /** 角色自愿脱掉浴巾 */
 const AI_VOLUNTARY_UNDRESS =
-  /(?:我)?(?:把)?(?:浴巾|毛巾)(?:给)?(?:你)?(?:脱|解|拿|扯)|(?:脱掉|解开|拿开)(?:了)?(?:浴巾|毛巾)|(?:浴巾|毛巾)(?:掉了|滑落|松开)|不裹了|不裹着|给你看(?:看)?(?:身子|全貌)|敞(?:开|着)/;
+  /(?:我)?(?:把)?(?:浴巾|毛巾)(?:给)?(?:你)?(?:脱|解|拿|扯)|(?:脱掉|解开|拿开|脱下|解下)(?:了)?(?:你的|妳的)?(?:浴巾|毛巾)?|(?:浴巾|毛巾)(?:掉了|滑落|松开)|不裹了|不裹着|给你看(?:看)?(?:身子|全貌)|敞(?:开|着)|那就(?:我)?(?:就)?脱|我脱(?:下|掉|了)|脱给你看/;
 
 /** 角色仍强调裹着浴巾（与成人立绘矛盾 → 禁止切成人） */
 const AI_STILL_WRAPPED =
@@ -140,11 +186,10 @@ const AI_PUT_TOWEL_BACK =
   /重新裹|裹回去|裹上(?:浴巾|毛巾)|穿上(?:浴巾|毛巾)|把(?:浴巾|毛巾)裹好|盖上(?:浴巾|毛巾)|收回/;
 
 const AI_REFUSES_UNDRESS =
-  /不(行|要|能|给)|拒绝|滚|别过来|做梦|变态|不许看|别脱|不准脱|才不脱|不要脱/;
+  /拒绝|滚|别过来|做梦|变态|不许看|别脱|不准脱|才不脱|不要脱|不行|不给|不要(?!脱)|不能(?!不脱)|(?<![能会])不脱/;
 
 const AI_AGREES_UNDRESS =
-  /行吧|好吧|那就脱|脱给你|解开了|拿开了|既然要看|看就看|随你看|脱了吧|解开吧/;
-
+  /行吧|好吧|那就脱|脱给你|解开了|解下了|脱下了|拿开了|既然要看|看就看|随你看|脱了吧|脱掉吧|解开吧|解下浴巾|脱下浴巾|那我就脱|脱下来|怎么能不脱|怎么能不|看好了|看仔细|不许后悔|脱给你看|那就脱下来|既然.{0,8}脱/;
 /**
  * 从本轮对白推断「是否脱掉浴巾」：
  * - true：明确脱巾（玩家要求且同意，或角色自愿）

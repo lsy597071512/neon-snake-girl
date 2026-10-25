@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>角色音色试听 · Qwen-Audio-TTS</title>
+<style>
+  :root {
+    --bg: #0b0e13;
+    --panel: #131822;
+    --panel-2: #0f141d;
+    --line: #263042;
+    --text: #e8edf6;
+    --muted: #8b98ad;
+    --accent: #ffb347;
+    --accent-2: #7ce3ff;
+    --ok: #57d98a;
+    --err: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(124, 227, 255, .08), transparent 60%),
+      radial-gradient(900px 500px at 90% 0%, rgba(255, 179, 71, .08), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font: 14px/1.55 "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding: 22px clamp(14px, 3vw, 40px) 80px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: .5px; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); margin: 0 0 18px; font-size: 12.5px; }
+  .panel {
+    background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01)), var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; }
+  label.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); min-width: 180px; }
+  label.field.grow { flex: 1 1 320px; }
+  input[type=text], input[type=password], textarea, select {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 8px 10px;
+    font: inherit;
+    outline: none;
+  }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent-2); }
+  textarea { resize: vertical; min-height: 58px; width: 100%; }
+  button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 8px 13px;
+    font: inherit;
+    cursor: pointer;
+    transition: .15s;
+  }
+  button:hover { border-color: var(--accent); color: #fff; }
+  button.primary { background: linear-gradient(180deg, #ffc568, #ff9f1c); color: #201400; border: none; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.06); }
+  button.ghost { background: transparent; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.audio { color: var(--accent); border-color: rgba(255,179,71,.45); }
+  .badge.legacy { color: var(--accent-2); border-color: rgba(124,227,255,.35); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+  .card {
+    background: linear-gradient(180deg, rgba(255,255,255,.025), transparent), var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    padding: 13px 14px 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .card.playing { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(255,179,71,.25), 0 8px 30px rgba(0,0,0,.35); }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .name { font-size: 15px; font-weight: 600; }
+  .trait { color: var(--muted); font-size: 12px; }
+  .voice-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .voice-line code {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
+    padding: 2px 7px; font-size: 12px; color: #cfe3ff;
+  }
+  .voice-line select { flex: 1 1 190px; font-size: 12.5px; padding: 6px 8px; }
+  details { border-top: 1px dashed var(--line); padding-top: 8px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  details[open] summary { color: var(--accent-2); }
+  .knobs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0; }
+  .knobs label { font-size: 11px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+  .knobs output { color: var(--text); font-size: 12px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .status { min-height: 16px; font-size: 12px; color: var(--muted); }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .footer-note { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .pill { font-size: 12px; color: var(--muted); }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 0; }
+  .filters input { flex: 1 1 220px; }
+</style>
+</head>
+<body>
+  <h1>角色音色试听 <span>· Qwen-Audio-TTS</span></h1>
+  <p class="sub">只试听音色，不含任何美术资源。主通道 <code id="modelLabel">qwen-audio-3.1-tts-flash</code>（支持人设 instruction / 语速 / 音高 / 音量），旧通道 <code>qwen3-tts-flash</code> 仅作对比。</p>
+
+  <section class="panel">
+    <div class="row">
+      <label class="field grow">Qwen API Key（百炼，仅存本机 localStorage）
+        <input id="apiKey" type="password" autocomplete="off" placeholder="sk-..." />
+      </label>
+      <label class="field">业务空间 ID（可选）
+        <input id="workspaceId" type="text" placeholder="留空走通用域名" />
+      </label>
+      <button id="saveKey" class="ghost">保存设置</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label class="field grow">试听台词（角色名/情绪可自行改）
+        <textarea id="sampleText">通讯接通。今天风向偏东，别走北侧沙脊——把面罩戴好，我带你安全抵达。</textarea>
+      </label>
+    </div>
+    <div class="toolbar" style="margin-top:12px">
+      <button id="playAll" class="primary">全部试听（Audio）</button>
+      <button id="stopBtn" class="ghost">停止</button>
+      <label class="pill"><input type="checkbox" id="fixedSeed" checked /> 固定种子（便于 A/B 对比）</label>
+      <input id="seedInput" type="text" value="auto" style="width:110px" title="填 auto = 与游戏一致：按角色 id 派生固定 seed" />
+      <button id="exportBtn" class="primary">导出调音 JSON</button>
+      <span id="globalStatus" class="pill"></span>
+    </div>
+    <textarea id="exportOut" style="margin-top:10px;display:none;min-height:120px;font-family:ui-monospace,Consolas,monospace;font-size:12px"></textarea>
+    <p class="footer-note">首次请求若报 401/域名错误：确认 Key 是北京地域、账号已开通百炼语音；必要时填业务空间 ID。旧通道复刻音色（qwen-tts-vc-*）可能不可用，属预期。<br />
+      调音说明：<b>音高</b>走云端 pitch，<b>语速</b>走本地 playbackRate（浏览器 preservesPitch 保音高）——两者不再互相覆盖，滑块一定会动。<br />
+      调满意后点每张卡的「记住本机」，再点「导出调音 JSON」，把 JSON（或下载的 voice-tuning.json）发给我，我写回游戏配置。</p>
+  </section>
+
+  <section class="panel" style="padding-bottom:10px">
+    <div class="filters">
+      <input id="filter" type="text" placeholder="搜索角色 / 音色 ID / 特质" />
+      <span class="pill" id="count"></span>
+    </div>
+  </section>
+
+  <main id="cards" class="grid"></main>
+
+<script>
+(() => {
+  const AUDIO_MODEL = 'qwen-audio-3.1-tts-flash';
+  const AUDIO_URL_GENERIC = 'https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer';
+  const LEGACY_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation';
+  const KEY_STORAGE = 'rust-belt-ai-api-key';
+  const WS_STORAGE = 'aiVoiceWorkspaceId';
+
+  /** 官方 Qwen-Audio-TTS 女性音色（v3.1） */
+  const VOICES = [
+    ['longanhuan_v3.1', '龙安欢·自然亲切（多语种）'],
+    ['longanlingxin_v3.1', '龙安灵心·知心温暖（多语种）'],
+    ['longanfengyue_v3.1', '龙安风悦·自然亲切（多语种）'],
+    ['yuxiaoyun_v3.1', '于小云·元气亲切'],
+    ['qiaoxiaojiao_v3.1', '乔小娇·俏丽可爱'],
+    ['xiaxiaochen_v3.1', '夏小晨·元气明亮'],
+    ['wenhuaiqing_v3.1', '温怀清·清亮柔和'],
+    ['anxiaolan_v3.1', '安小岚·清甜纯净'],
+    ['xieshurou_v3.1', '谢舒柔·柔和知性'],
+    ['baiqinglan_v3.1', '白清岚·明亮清纯'],
+    ['xuyuyuan_v3.1', '许玉远·知性成熟'],
+    ['anruorou_v3.1', '安若柔·气声知性'],
+    ['wenhuaizhi_v3.1', '闻怀之·稳重成熟'],
+    ['xiaoxingzhi_v3.1', '萧行之·端庄贵气'],
+    ['guyunshu_v3.1', '顾云舒·成熟稳重'],
+    ['yeqinghe_v3.1', '叶清禾·亲切温柔'],
+    ['yunhuanhuan_v3.1', '云欢欢·高亢热情'],
+    ['xuxiaoqiao_v3.1', '徐小俏·自然俏皮'],
+    ['baianran_v3.1', '白安然·低沉浑厚气声'],
+    ['xuyanchu_v3.1', '许言初·沉稳磁性'],
+    ['yezhiqing_v3.1', '叶知晴·轻快自然'],
+    ['anyuqing_v3.1', '安语晴·甜妹'],
+    ['longanyuanfei_v3.1', '龙安元妃·高傲'],
+    ['longanlingxi_v3.1', '龙安灵希·可爱甜美'],
+    ['longyingtao_v3.1', '龙应桃·温柔淡定'],
+    ['longanya_v3.1', '龙安雅·高雅气质'],
+    ['longwan_v3.1', '龙婉·细腻柔声'],
+    ['longxing_v3.1', '龙星·温婉邻家'],
+    ['longhua_v3.1', '龙华·元气甜美'],
+    ['loongstella_v3.1', 'loongstella·飒爽利落'],
+    ['longyuan_v3.1', '龙媛·温暖治愈'],
+    ['longmiao_v3.1', '龙妙·抑扬顿挫'],
+    ['longanli_v3.1', '龙安莉·利落从容'],
+    ['longanwen_v3.1', '龙安温·优雅知性'],
+    ['longxiaoxia_v3.1', '龙小夏·沉稳权威'],
+    ['longpaopao_v3.1', '龙泡泡·飞天泡泡音'],
+  ];
+
+  /** 与游戏内 characterVoices.ts 一致 */
+  const PROFILES = [
+    { id: 'ashcrow', name: '苍羽·澪', voice: 'longyingtao_v3.1', legacy: 'Cherry', trait: '龙应桃·温柔淡定（自动匹配）', rate: 0.95, pitch: 1.03, volume: 54,
+      instruction: '请用十八岁冷静开路少女的嗓音说话，音色偏女性、清晰柔韧，吐字干脆但不中性不沙哑；像突击手确认风向，年轻女声，不要撒娇粘人，不要老气或御姐感。' },
+    { id: 'heartforge', name: '白楠·芹奈', voice: 'longwan_v3.1', legacy: 'Serena', trait: '龙婉·细腻柔声（自动匹配）', rate: 1.01, pitch: 1.01, volume: 54,
+      instruction: '请用十九岁温柔能干的少女嗓音说话，暖、稳、护心，像贤内助关心队友，不要刻薄，也不要稚气童声。' },
+    { id: 'mirror', name: '银绯·玲', voice: 'yezhiqing_v3.1', legacy: 'Maia', trait: '叶知晴·轻快自然（自动匹配）', rate: 1.03, pitch: 1, volume: 50,
+      instruction: '请用十八岁疏离理性的少女嗓音说话，语速偏稳、带一点距离感，像光学观测在报概率，不要傲娇，不要成熟御姐。' },
+    { id: 'neoncoil', name: '苍斩·凛', voice: 'yuxiaoyun_v3.1', legacy: 'Katerina', trait: '于小云·元气亲切（自动匹配）', rate: 0.98, pitch: 1.04, volume: 46,
+      instruction: '请用十八岁寡言渗透刃少女的嗓音，轻、短、几乎不带情绪起伏，像任务完成式汇报；可略疏离空灵，仍是青年女声，不要甜腻，不要沧桑老气或成熟御姐播音腔。' },
+    { id: 'prismrift', name: '焰甲·朱里', voice: 'anruorou_v3.1', legacy: 'Vivian', trait: '安若柔·气声知性（自动匹配）', rate: 0.93, pitch: 0.95, volume: 55,
+      instruction: '请用二十岁务实重炮少女的嗓音，数字感强、少闲聊，像确认目标距离；可用一点干脆小暴躁的锋芒，干练但不沉闷老成。' },
+    { id: 'wireguard', name: '黄狐·萤', voice: 'yunhuanhuan_v3.1', legacy: 'Cherry', trait: '云欢欢·高亢热情（自动匹配）', rate: 0.95, pitch: 1.03, volume: 58,
+      instruction: '请用十八岁戏谑嘴毒的狐耳少女嗓音，语速偏快、尾音可上扬，玩笑里藏警戒，年轻明亮，不要御姐。' },
+    { id: 'frostline', name: '夜爪·黑织', voice: 'baianran_v3.1', legacy: 'qwen-tts-vc-yinse_pulse-voice-20260814110227791-7aaf', trait: '低沉浑厚气声（代夜爪）', rate: 1.13, pitch: 1.06, volume: 48,
+      instruction: '请用二十一岁清冷夜袭少女的嗓音：在此音色上刻意压沉、压低、少亮少尖；吐字克制、气声偏暗，像夜里压着杀意的夜爪；亲密话也只用低沉气声，禁止甜腻上扬、禁止小孩声或尖亮。' },
+    { id: 'pulse', name: '翠翼·铃', voice: 'xuxiaoqiao_v3.1', legacy: 'Nini', trait: '徐小俏·自然俏皮（自动匹配）', rate: 0.96, pitch: 0.96, volume: 54,
+      instruction: '请用十八岁明朗频谱少女的嗓音，健谈自然、略带上扬，但不要小孩声、不要又尖又亮；像同龄队友聊天，青年女声，禁止童声和刺耳尖音。' },
+    { id: 'dustblade', name: '绯尾·椿', voice: 'longxing_v3.1', legacy: 'Chelsie', trait: '龙星·温婉邻家（自动匹配）', rate: 0.93, pitch: 0.99, volume: 53,
+      instruction: '请用十九岁沙漠猎手少女的嗓音，语速稍快、利落自然；温柔微笑里带一点危险，句尾可轻扬，不是娇羞傲娇，也不是老气风情。' },
+    { id: 'ironrain', name: '橙铠·琥珀', voice: 'wenhuaiqing_v3.1', legacy: 'Mia', trait: '温怀清·清亮柔和（自动匹配）', rate: 0.86, pitch: 0.98, volume: 52,
+      instruction: '请用十八岁温软共情少女的嗓音，轻声、多关心，像把硬壳留给战斗，甜美年轻，不要童声过头。' },
+    { id: 'skyshard', name: '冰华·雫', voice: 'longanlingxi_v3.1', legacy: 'qwen-tts-vc-yinse_skyshard-voice-20260814110224868-a391', trait: '知心温暖', rate: 0.97, pitch: 1.06, volume: 52,
+      instruction: '请用十八岁温软共情少女的嗓音，轻声、多关心，像把硬壳留给战斗，甜美年轻，不要童声过头。' },
+    { id: 'stellar', name: '光轮·天音', voice: 'longanwen_v3.1', legacy: 'Seren', trait: '龙安温·优雅知性（自动匹配）', rate: 0.85, pitch: 0.98, volume: 48,
+      instruction: '请用外表十九岁的原型决战少女嗓音，疏离、短句像宣判，少人称；声线可低回舒缓但仍青年女声略飘，不要成熟播音腔或御姐感。' },
+    { id: 'outercore', name: '橙兔·美羽', voice: 'longhua_v3.1', legacy: 'Momo', trait: '龙华·元气甜美（自动匹配）', rate: 1.03, pitch: 1, volume: 58,
+      instruction: '请用十八岁星种兔少女的嗓音，俏皮卖萌接梗，内核可瞬间转冷；年轻甜萌，禁止老气或御姐。' },
+  ];
+
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const state = {
+    apiKey: localStorage.getItem(KEY_STORAGE) || '',
+    workspaceId: localStorage.getItem(WS_STORAGE) || '',
+    currentAudio: null,
+    currentCard: null,
+    queueToken: 0,
+    seed: 'auto',
+    fixedSeed: true,
+  };
+  const TUNE_KEY = 'voiceTuning';
+
+  const els = {
+    apiKey: $('#apiKey'),
+    workspaceId: $('#workspaceId'),
+    sampleText: $('#sampleText'),
+    cards: $('#cards'),
+    filter: $('#filter'),
+    count: $('#count'),
+    globalStatus: $('#globalStatus'),
+  };
+  els.apiKey.value = state.apiKey;
+  els.workspaceId.value = state.workspaceId;
+
+  function saveSettings() {
+    state.apiKey = els.apiKey.value.trim();
+    state.workspaceId = els.workspaceId.value.trim();
+    localStorage.setItem(KEY_STORAGE, state.apiKey);
+    localStorage.setItem(WS_STORAGE, state.workspaceId);
+    say('设置已保存', 'ok');
+  }
+  $('#saveKey').addEventListener('click', saveSettings);
+
+  function say(text, kind = '') {
+    els.globalStatus.textContent = text;
+    els.globalStatus.className = 'pill';
+    if (kind === 'ok') els.globalStatus.style.color = 'var(--ok)';
+    else if (kind === 'err') els.globalStatus.style.color = 'var(--err)';
+    else els.globalStatus.style.color = 'var(--muted)';
+  }
+
+  function loadTuning() {
+    try { return JSON.parse(localStorage.getItem(TUNE_KEY) || '{}'); } catch { return {}; }
+  }
+
+  $('#fixedSeed').addEventListener('change', (e) => {
+    state.fixedSeed = e.target.checked;
+  });
+  $('#seedInput').addEventListener('input', (e) => {
+    const raw = (e.target.value || '').trim().toLowerCase();
+    if (raw === 'auto' || raw === '') {
+      state.seed = 'auto';
+    } else {
+      const v = parseInt(raw, 10);
+      state.seed = Number.isFinite(v) ? v : 'auto';
+    }
+  });
+  /** 与游戏一致的按角色派生 seed：同一角色每次渲染完全一致，音色细节不飘 */
+  function seedForCharacter(characterId) {
+    let h = 2166136261;
+    for (let i = 0; i < characterId.length; i++) {
+      h ^= characterId.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return 1000 + (Math.abs(h) % 60000);
+  }
+
+  $('#exportBtn').addEventListener('click', () => {
+    const out = {};
+    const cards = [...els.cards.querySelectorAll('.card')];
+    for (const card of cards) {
+      const pid = card.dataset.profileId;
+      const profile = PROFILES.find((p) => p.id === pid);
+      if (!profile) continue;
+      const tune = cardOverrides(profile, card);
+      out[pid] = {
+        name: profile.name,
+        voice: tune.voice,
+        rate: Number(Number(tune.rate).toFixed(2)),
+        pitch: Number(Number(tune.pitch).toFixed(2)),
+        volume: Math.round(tune.volume),
+        instruction: tune.instruction.trim(),
+      };
+    }
+    const json = JSON.stringify(out, null, 2);
+    const area = $('#exportOut');
+    area.style.display = 'block';
+    area.value = json;
+    try {
+      const blob = new Blob([json], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'voice-tuning.json';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      say('已下载 voice-tuning.json，并把内容贴在上方文本框', 'ok');
+    } catch (e) {
+      say('下载失败，请手动复制上方 JSON', 'err');
+    }
+    navigator.clipboard?.writeText(json).catch(() => {});
+  });
+
+  function setCardStatus(card, text, kind = '') {
+    const el = card.querySelector('.status');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  function stopAudio() {
+    if (state.currentAudio) {
+      try { state.currentAudio.pause(); } catch {}
+      state.currentAudio = null;
+    }
+    if (state.currentCard) {
+      state.currentCard.classList.remove('playing');
+      state.currentCard = null;
+    }
+  }
+  $('#stopBtn').addEventListener('click', () => { state.queueToken++; stopAudio(); say('已停止'); });
+
+  function audioEndpoints() {
+    const ws = (els.workspaceId.value || '').trim();
+    const list = [];
+    if (ws) list.push(`https://${ws}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer`);
+    list.push(AUDIO_URL_GENERIC);
+    return list;
+  }
+
+  async function requestAudio({ url, body }) {
+    const key = (els.apiKey.value || '').trim();
+    if (!key) throw new Error('未填 API Key');
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const raw = await res.text();
+    let data = null;
+    try { data = JSON.parse(raw); } catch {}
+    if (!res.ok || (data && data.code)) {
+      const msg = (data && (data.message || data.code)) || `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    const audio = data && data.output && data.output.audio;
+    if (!audio) throw new Error('响应没有音频');
+    if (audio.data) return dataUrlToBlob(audio.data);
+    if (audio.url) {
+      const httpsUrl = audio.url.replace(/^http:\/\//, 'https://');
+      const r = await fetch(httpsUrl);
+      if (!r.ok) throw new Error(`下载音频失败 HTTP ${r.status}`);
+      return await r.blob();
+    }
+    throw new Error('响应没有音频地址');
+  }
+
+  function dataUrlToBlob(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: 'audio/wav' });
+  }
+
+  async function synthAudio(profile, card, overrides) {
+    const text = (els.sampleText.value || '').trim() || '通讯接通。';
+    const body = {
+      model: AUDIO_MODEL,
+      input: {
+        text,
+        voice: overrides.voice,
+        format: 'wav',
+        sample_rate: 24000,
+        volume: Math.round(overrides.volume),
+        // 只把音高交给云端；语速在本地用 playbackRate 控制
+        // （云端同时收 rate≠1 时会忽略 pitch，音高滑块会“没反应”）
+        ...(Math.abs(overrides.pitch - 1) > 0.005 ? { pitch: overrides.pitch } : {}),
+        language_hints: ['zh'],
+        instruction: overrides.instruction.slice(0, 500),
+        ...(state.fixedSeed
+          ? { seed: state.seed === 'auto' ? seedForCharacter(profile.id) : state.seed }
+          : {}),
+      },
+    };
+    let lastErr = null;
+    for (const url of audioEndpoints()) {
+      try {
+        setCardStatus(card, '合成中…');
+        const blob = await requestAudio({ url, body });
+        setCardStatus(card, `完成 · ${(blob.size / 1024).toFixed(0)} KB`, 'ok');
+        return blob;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error('合成失败');
+  }
+
+  async function synthLegacy(profile, card) {
+    const voice = profile.legacy;
+    const body = {
+      model: 'qwen3-tts-flash',
+      input: { text: (els.sampleText.value || '').trim() || '通讯接通。', voice, language_type: 'Chinese' },
+    };
+    const key = (els.apiKey.value || '').trim();
+    if (!key) throw new Error('未填 API Key');
+    setCardStatus(card, '旧通道合成中…');
+    const res = await fetch(LEGACY_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const raw = await res.text();
+    let data = null;
+    try { data = JSON.parse(raw); } catch {}
+    if (!res.ok || (data && data.code)) {
+      throw new Error((data && (data.message || data.code)) || `HTTP ${res.status}`);
+    }
+    const audio = data && data.output && data.output.audio;
+    if (!audio) throw new Error('响应没有音频');
+    if (audio.url) {
+      const r = await fetch(audio.url.replace(/^http:\/\//, 'https://'));
+      if (!r.ok) throw new Error(`下载音频失败 HTTP ${r.status}`);
+      return await r.blob();
+    }
+    if (audio.data) return dataUrlToBlob(audio.data);
+    throw new Error('响应没有音频');
+  }
+
+  function playBlob(blob, card, label, tune) {
+    stopAudio();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    // 云端已做 pitch；本地只调速，并用 preservesPitch 保证音高不再被改
+    const p = tune?.pitch ?? 1;
+    const rate = tune?.rate ?? 1;
+    if ('preservesPitch' in audio) audio.preservesPitch = true;
+    if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
+    audio.playbackRate = Math.abs(p - 1) < 0.01 ? rate : Math.min(2, Math.max(0.5, rate * Math.pow(p, -1.85)));
+    state.currentAudio = audio;
+    state.currentCard = card;
+    card.classList.add('playing');
+    audio.onended = () => {
+      card.classList.remove('playing');
+      URL.revokeObjectURL(url);
+      if (state.currentAudio === audio) state.currentAudio = null;
+    };
+    audio.onerror = () => {
+      card.classList.remove('playing');
+      setCardStatus(card, '播放失败', 'err');
+    };
+    audio.play().catch((e) => setCardStatus(card, '播放失败：' + (e.message || e), 'err'));
+    setCardStatus(card, `播放中 · ${label} · rate ${rate.toFixed(2)} / pitch ${p.toFixed(2)}`, 'ok');
+  }
+
+  function cardOverrides(profile, card) {
+    const voice = card.querySelector('.voice-select').value;
+    const rate = Number(card.querySelector('.rate').value);
+    const pitch = Number(card.querySelector('.pitch').value);
+    const volume = Number(card.querySelector('.volume').value);
+    const instruction = card.querySelector('.instruction').value;
+    return { voice, rate, pitch, volume, instruction };
+  }
+
+  function makeCard(profile) {
+    const card = document.createElement('article');
+    card.className = 'card';
+    card.dataset.search = `${profile.name} ${profile.id} ${profile.voice} ${profile.trait} ${profile.legacy}`.toLowerCase();
+    card.dataset.profileId = profile.id;
+    const options = VOICES.map(([v, label]) =>
+      `<option value="${v}"${v === profile.voice ? ' selected' : ''}>${label} · ${v}</option>`
+    ).join('');
+    card.innerHTML = `
+      <div class="card-head">
+        <div>
+          <div class="name">${profile.name}</div>
+          <div class="trait">${profile.trait} · <span class="badge audio">Audio</span> <span class="badge legacy">Legacy</span></div>
+        </div>
+      </div>
+      <div class="voice-line">
+        <code class="voice-id">${profile.voice}</code>
+        <code class="legacy-id">旧音色：${profile.legacy}</code>
+        <select class="voice-select">${options}</select>
+      </div>
+      <div class="actions">
+        <button class="primary play-audio">试听 Audio</button>
+        <button class="play-legacy">试听旧通道</button>
+        <button class="ghost save-tune">记住本机</button>
+      </div>
+      <div class="status"></div>
+      <details>
+        <summary>高级：instruction / 语速 / 音高 / 音量</summary>
+        <textarea class="instruction">${profile.instruction}</textarea>
+        <div class="knobs">
+          <label>rate <output class="rate-out">${profile.rate}</output>
+            <input class="rate" type="range" min="0.5" max="2" step="0.01" value="${profile.rate}" />
+          </label>
+          <label>pitch <output class="pitch-out">${profile.pitch}</output>
+            <input class="pitch" type="range" min="0.5" max="2" step="0.01" value="${profile.pitch}" />
+          </label>
+          <label>volume <output class="volume-out">${profile.volume}</output>
+            <input class="volume" type="range" min="0" max="100" step="1" value="${profile.volume}" />
+          </label>
+        </div>
+      </details>`;
+    const select = card.querySelector('.voice-select');
+    select.addEventListener('change', () => {
+      card.querySelector('.voice-id').textContent = select.value;
+    });
+    card.querySelectorAll('input[type=range]').forEach((input) => {
+      const out = card.querySelector(`.${input.className}-out`);
+      input.addEventListener('input', () => { if (out) out.textContent = Number(input.value).toFixed(input.className === 'volume' ? 0 : 2); });
+    });
+    card.querySelector('.play-audio').addEventListener('click', async () => {
+      try {
+        const token = ++state.queueToken;
+        const tune = cardOverrides(profile, card);
+        const blob = await synthAudio(profile, card, tune);
+        if (token !== state.queueToken) return;
+        playBlob(blob, card, tune.voice, tune);
+      } catch (e) {
+        setCardStatus(card, '失败：' + (e.message || e), 'err');
+      }
+    });
+    card.querySelector('.play-legacy').addEventListener('click', async () => {
+      try {
+        const token = ++state.queueToken;
+        const blob = await synthLegacy(profile, card);
+        if (token !== state.queueToken) return;
+        playBlob(blob, card, profile.legacy, { rate: 1, pitch: 1 });
+      } catch (e) {
+        setCardStatus(card, '旧通道失败：' + (e.message || e), 'err');
+      }
+    });
+    card.querySelector('.save-tune').addEventListener('click', () => {
+      const tune = cardOverrides(profile, card);
+      const all = loadTuning();
+      all[profile.id] = {
+        voice: tune.voice,
+        rate: Number(tune.rate.toFixed(2)),
+        pitch: Number(tune.pitch.toFixed(2)),
+        volume: Math.round(tune.volume),
+        instruction: tune.instruction.trim(),
+      };
+      localStorage.setItem(TUNE_KEY, JSON.stringify(all));
+      setCardStatus(card, '已记住本机（导出 JSON 可写入游戏）', 'ok');
+    });
+    const saved = loadTuning()[profile.id];
+    if (saved) {
+      const sel = card.querySelector('.voice-select');
+      if ([...sel.options].some((o) => o.value === saved.voice)) sel.value = saved.voice;
+      card.querySelector('.voice-id').textContent = sel.value;
+      card.querySelector('.rate').value = saved.rate;
+      card.querySelector('.pitch').value = saved.pitch;
+      card.querySelector('.volume').value = saved.volume;
+      card.querySelector('.instruction').value = saved.instruction;
+      card.querySelectorAll('input[type=range]').forEach((input) => {
+        const out = card.querySelector(`.${input.className}-out`);
+        if (out) out.textContent = Number(input.value).toFixed(input.className === 'volume' ? 0 : 2);
+      });
+    }
+    return card;
+  }
+
+  PROFILES.forEach((p) => els.cards.appendChild(makeCard(p)));
+
+  function applyFilter() {
+    const q = els.filter.value.trim().toLowerCase();
+    let shown = 0;
+    els.cards.querySelectorAll('.card').forEach((card) => {
+      const hit = !q || card.dataset.search.includes(q);
+      card.style.display = hit ? '' : 'none';
+      if (hit) shown++;
+    });
+    els.count.textContent = `显示 ${shown} / ${PROFILES.length}`;
+  }
+  els.filter.addEventListener('input', applyFilter);
+  applyFilter();
+
+  $('#playAll').addEventListener('click', async () => {
+    const token = ++state.queueToken;
+    const cards = [...els.cards.querySelectorAll('.card')].filter((c) => c.style.display !== 'none');
+    say(`全部试听：0 / ${cards.length}`);
+    for (let i = 0; i < cards.length; i++) {
+      if (token !== state.queueToken) return;
+      const card = cards[i];
+      const profile = PROFILES.find((p) => p.id === card.dataset.profileId);
+      if (!profile) continue;
+      try {
+        const tune = cardOverrides(profile, card);
+        const blob = await synthAudio(profile, card, tune);
+        if (token !== state.queueToken) return;
+        await new Promise((resolve) => {
+          playBlob(blob, card, tune.voice, tune);
+          const audio = state.currentAudio;
+          const done = () => resolve();
+          if (audio) { audio.onended = () => { done(); }; audio.onerror = () => { done(); }; }
+          else resolve();
+        });
+      } catch (e) {
+        setCardStatus(card, '失败：' + (e.message || e), 'err');
+      }
+      say(`全部试听：${i + 1} / ${cards.length}`);
+    }
+    if (token === state.queueToken) say('全部试听完成', 'ok');
+  });
+})();
+</script>
+</body>
+</html>

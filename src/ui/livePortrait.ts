@@ -1,5 +1,9 @@
 import { CHARACTER_MAP } from '../data/characters';
-import { getCharacterSkin, SHOWER_SKIN_ID, SLEEPWEAR_SKIN_ID } from '../data/characterSkins';
+import {
+  getCharacterSkin,
+  isAloneBathSkinId,
+  SLEEPWEAR_SKIN_ID,
+} from '../data/characterSkins';
 import { getBathIntimateConsent, getBathIntimateIntroDone } from '../ai/bathIntimateConsent';
 import { getAiLiving } from '../ai/livingService';
 import { resolvePresence } from '../ai/livingState';
@@ -36,14 +40,14 @@ export type ShowerCampPortraitPlan = {
   loop: boolean;
 };
 
-/** 营地对话：蒸汽毛巾三态播放（待机 / 脱巾前奏 full / 无巾循环） */
+/** 营地对话：独自泡澡/蒸汽毛巾 裹巾待机 / 脱巾前奏 / 无巾循环 */
 export function resolveCampShowerPortraitPlayback(
   charId: string,
   living = getAiLiving(),
 ): ShowerCampPortraitPlan | null {
   const skinId = getRuntimeActiveSkinId(charId, 'camp');
-  if (skinId !== SHOWER_SKIN_ID) return null;
-  const skin = getCharacterSkin(charId, skinId);
+  if (!isAloneBathSkinId(skinId)) return null;
+  const skin = getCharacterSkin(charId, skinId!);
   if (!skin) return null;
 
   if (!getBathIntimateConsent(living, charId)) {
@@ -69,8 +73,8 @@ export function getLivePortraitSrc(charId: string, opts?: PortraitResolveOpts): 
     const skin = getCharacterSkin(charId, skinId);
     if (!skin) return CHARACTER_MAP[charId]?.portraitLive ?? null;
 
-    // 蒸汽毛巾：仅营地；常态播 idle 待机；成人同意后才切 intimate webm
-    if (skinId === SHOWER_SKIN_ID) {
+    // 独自泡澡(pifu09) / 蒸汽毛巾(pifu03)：仅营地；常态播 idle；成人同意后切 intimate
+    if (isAloneBathSkinId(skinId)) {
       if (channel !== 'camp') return null;
       try {
         if (getBathIntimateConsent(getAiLiving(), charId)) {
@@ -176,12 +180,25 @@ export function armSilentPortraitVideo(video: HTMLVideoElement): void {
       video.removeAttribute('poster');
       video.poster = '';
     };
+    /**
+     * 动态立绘加载失败（0 字节 webm / 资源缺失）时的降级：
+     * 这类文件只会触发 error、永远不会 playing，若继续保留 is-awaiting-play，
+     * 立绘会被永久隐藏成空白 —— 表现为「角色说自己换了衣服，但画面上没有」。
+     * 这里撤掉等待态，让元素退回显示 poster 静帧（portraits[0]），
+     * 至少保证「换了哪套衣服」是看得见的，而不是整个人消失。
+     */
+    const onError = () => {
+      video.classList.remove('is-awaiting-play');
+      video.classList.add('is-live-fallback');
+      video.dataset.liveFallback = '1';
+    };
     video.addEventListener('loadstart', reinforce);
     video.addEventListener('loadedmetadata', reinforce);
     video.addEventListener('emptied', reinforce);
     video.addEventListener('emptied', awaitPlay);
     video.addEventListener('loadstart', awaitPlay);
     video.addEventListener('playing', onPlaying);
+    video.addEventListener('error', onError);
   }
 }
 

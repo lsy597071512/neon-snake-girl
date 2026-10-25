@@ -11,37 +11,40 @@
 import {
   CASUAL_FASHION_SKIN_ID,
   getCharacterSkin,
+  isAloneBathSkinId,
   LIFEWEAR_SKIN_ID,
   POOL_PARTY_SKIN_ID,
-  SHOWER_SKIN_ID,
   SLEEPWEAR_SKIN_ID,
   SPECIAL_DARE_SKIN_ID,
 } from '../data/characterSkins';
 import { CHARACTER_MAP } from '../data/characters';
+import { CAMP_ROOM_MAP, getCharacterSleepRoom } from '../data/campLayout';
 import type { SaveData } from '../types';
 import {
   getCampLogicalSkinId,
+  getCampWornSkinId,
   hasCampSkinAsset,
   setCampWornSkin,
 } from './campOutfit';
 import { isCharacterInActiveCampEvent } from './campEvents/campEventEffects';
+import { forceScheduleOutfitChange, schedulePresenceOutfitChange, shouldHoldAutoOutfit } from './outfitChangeProcess';
 import { getAgenda, isAgendaActive } from './characterAgenda';
 import { computeDesires } from './characterDesires';
 import { personaDayMode } from './characterPersona';
 import { getMemoryLines, pushMemory } from './memory';
 import { getAffinity } from './relationship';
+import { isBathAssistActiveFor } from './bathAssistSession';
 import { isDisciplineActiveFor } from './disciplineSession';
 import type { AiLivingSave } from './types';
 import { getHour } from './worldClock';
-import { shouldHoldAutoOutfit, schedulePresenceOutfitChange } from './outfitChangeProcess';
 
 /** 同角色两次情绪换装的最短游戏分钟间隔（调情高档可略缩短） */
 const OUTFIT_COOLDOWN_GAME_MIN = 75;
 const OUTFIT_COOLDOWN_FLIRT_GAME_MIN = 40;
 
-/** 调情 / 挑逗 / 情趣 / 色诱等成人娱乐意图线索 */
+/** 调情 / 撩拨 / 展示身材 等亲近娱乐意图线索 */
 const SPECIAL_FLIRT_RE =
-  /调情|色诱|挑逗|情趣|勾引|性暗示|捉弄|身体接触|贴身|撩|暧昧|玩火|咬耳|坐腿|展示身材|特殊服装|pifu05|想被指挥官|想跟指挥官玩|想捉弄指挥官/;
+  /(调情|撩拨|撩|暧昧|贴近|展示身材|特殊服装|pifu05|想被指挥官|想跟指挥官玩|想捉弄指挥官|逗指挥官|勾人)/;
 
 type OutfitWant = {
   /** null = 默认战斗装甲；生活服装请填 LIFEWEAR_SKIN_ID */
@@ -184,38 +187,43 @@ export function suggestEmotionOutfit(
   const room = agenda && isAgendaActive(agenda) ? agenda.targetRoomId : '';
   const activity = agenda && isAgendaActive(agenda) ? agenda.activity : '';
 
-  // 0) 冲澡皮绝不作为营地日常；误穿则回生活服装
-  if (cur === SHOWER_SKIN_ID) {
-    return { ...toBaseline(), reason: '蒸汽毛巾不可日常穿着，换回生活服装' };
+  // 0) 独自洗浴皮绝不作为营地日常；误穿则回生活服装
+  if (isAloneBathSkinId(cur)) {
+    return { ...toBaseline(), reason: '独自泡澡/蒸汽毛巾不可日常穿着，换回生活服装' };
+  }
+  // 0a) 帮洗/共浴皮仅会话临时；误穿则回生活服装
+  if (cur === 'pifu07' || cur === 'pifu08') {
+    return { ...toBaseline(), reason: '帮洗/共浴皮不可日常穿着，换回生活服装' };
   }
 
   // 0b) 特殊服装01：执勤时脱下 → 装甲
   if (cur === SPECIAL_DARE_SKIN_ID) {
-    if (
-      activity === 'patrol' ||
-      activity === 'guard' ||
-      activity === 'maintain' ||
-      activity === 'busy' ||
-      /patrol|guard|armory|duty|weapon|tower|work/.test(goal)
-    ) {
+    const dutyRoom0 =
+      room === 'room_1f_armory' ||
+      room === 'room_1f_tower' ||
+      CAMP_ROOM_MAP[room]?.kind === 'mechanical';
+    if (dutyRoom0 && (activity === 'patrol' || activity === 'guard' || activity === 'maintain')) {
       return { skinId: null, reason: '特殊服装01不宜执勤，换上默认战斗装甲' };
     }
   }
 
-  // 1) 执勤 / 武器库 / 塔 / 守门 / 室外干活 → 默认甲
-  if (
-    /patrol|guard|armory|duty|weapon|tower/.test(goal) ||
+  // 1) 执勤 / 武器库 / 塔 / 守门 → 默认甲。
+  // 必须要「执勤场地 + 执勤活动」同时成立；大厅里随口说一句「修枪/守卫」
+  // 不再套装甲，否则营地里装甲占比会失控（用户反馈：说话时还穿着一身战斗甲）。
+  const dutyRoom =
     room === 'room_1f_armory' ||
     room === 'room_1f_tower' ||
-    activity === 'patrol' ||
-    activity === 'guard' ||
-    activity === 'maintain'
-  ) {
+    CAMP_ROOM_MAP[room]?.kind === 'mechanical';
+  const dutyAct = activity === 'patrol' || activity === 'guard' || activity === 'maintain';
+  if (dutyRoom && dutyAct) {
     if (cur) return { skinId: null, reason: '执勤/军械/武装相关，换上默认战斗装甲' };
     return null;
   }
+  if (dutyAct && /patrol|guard|armory|duty|tower/.test(goal) && cur) {
+    return { skinId: null, reason: '执勤/军械/武装相关，换上默认战斗装甲' };
+  }
 
-  // 洗浴中：蒸汽毛巾由 applyBatheShowerSkins 临时挂载，情绪选装勿抢
+  // 洗浴中：独自泡澡由 applyBatheShowerSkins 临时挂载，情绪选装勿抢
   if (activity === 'bathe' || room === 'room_1f_bath' || goal === 'bathe') {
     return null;
   }
@@ -233,21 +241,45 @@ export function suggestEmotionOutfit(
     return null;
   }
 
-  // 3) 夜间休息 / 疲惫 / 回房睡觉 → 睡衣
-  const wantRest =
-    lateNight ||
+  // 3) 夜间回房睡觉 / 正在睡眠 → 睡衣（大厅发呆/维护不得默认睡衣）
+  const sleepRoomId = getCharacterSleepRoom(characterId).id;
+  const inSleepRoom = room === sleepRoomId || /sleep|nap|回房睡|睡觉/.test(goal);
+  const wantSleepwear =
     activity === 'sleeping' ||
-    activity === 'rest' ||
-    /sleep|rest|nap|回房|歇/.test(goal) ||
-    hasStatus(living, characterId, 'fatigue') ||
-    (night && (dayMode === 'withdrawn' || dayMode === 'idle')) ||
-    (night && desires.scores.rest >= 50);
+    /^(?:sleep|nap)/.test(goal) ||
+    /睡觉|入睡|回房睡/.test(goal) ||
+    (lateNight && (activity === 'rest' || dayMode === 'withdrawn') && inSleepRoom);
 
-  if (hasSleep && wantRest) {
+  if (hasSleep && wantSleepwear) {
     if (cur !== SLEEPWEAR_SKIN_ID) {
-      return { skinId: SLEEPWEAR_SKIN_ID, reason: '累了/夜里想放松，换上星夜睡衣' };
+      return { skinId: SLEEPWEAR_SKIN_ID, reason: '回房休息/睡觉，换上星夜睡衣' };
     }
     return null;
+  }
+
+  // 3b) 大厅/公共区仍穿睡衣 → 白天或清醒活动时换回生活服装（营地默认）
+  if (cur === SLEEPWEAR_SKIN_ID) {
+    const publicHall =
+      room === 'room_1f_hall1' ||
+      room === 'room_1f_hall2' ||
+      room === 'room_2f_lounge' ||
+      room === 'room_2f_atrium' ||
+      room === 'room_2f_yule' ||
+      /hall|lounge|atrium|yule|shop|yard/.test(goal);
+    const awakeBusy =
+      activity === 'busy' ||
+      activity === 'talking' ||
+      activity === 'play' ||
+      activity === 'idle' ||
+      activity === 'rest' ||
+      dayMode === 'dutiful' ||
+      dayMode === 'restless' ||
+      dayMode === 'playful' ||
+      dayMode === 'idle' ||
+      /maintain|work|hall|busy/.test(goal);
+    if ((hour >= 7 && hour < 22 && awakeBusy) || publicHall) {
+      return { ...toBaseline(), reason: '营地清醒活动，换回生活服装（非睡衣）' };
+    }
   }
 
   // 4) 白天还穿睡衣但已开工/社交 → 回生活服装（非装甲，除非上面执勤分支）
@@ -368,12 +400,8 @@ export function suggestEmotionOutfit(
   if (!cur && hasLife) {
     const act = String(activity || '');
     const stillDuty =
-      /patrol|guard|armory|duty|weapon|tower/.test(goal) ||
-      room === 'room_1f_armory' ||
-      room === 'room_1f_tower' ||
-      act === 'patrol' ||
-      act === 'guard' ||
-      act === 'maintain';
+      (dutyRoom && (act === 'patrol' || act === 'guard' || act === 'maintain')) ||
+      ((act === 'patrol' || act === 'guard') && /armory|tower|duty/.test(goal));
     if (!stillDuty) {
       return { skinId: LIFEWEAR_SKIN_ID, reason: '无执勤/军械需要，换回生活服装' };
     }
@@ -382,13 +410,15 @@ export function suggestEmotionOutfit(
   return null;
 }
 
-function applyWant(
+function queueWant(
   living: AiLivingSave,
   characterId: string,
   want: OutfitWant,
 ): boolean {
   // null → 战斗装甲标记；生活服装必须显式 LIFEWEAR_SKIN_ID
-  return setCampWornSkin(living, characterId, want.skinId ?? 'default').ok;
+  // 统一走延时换装：先播「换装中」过程皮，到点才换上新衣（禁止静止硬切）
+  const r = schedulePresenceOutfitChange(living, characterId, want.skinId ?? 'default');
+  return r.queued;
 }
 
 /**
@@ -406,6 +436,16 @@ export function tryApplyEmotionOutfits(
     if (shouldHoldAutoOutfit(living, id)) continue;
     const last = cd[id] ?? -9999;
     const wantProbe = suggestEmotionOutfit(save, living, id);
+    const curBefore = currentCampSkin(living, id);
+    // 脱战斗装甲回生活服装是「纠正」，不是「换装表演」：不受换装冷却与展示锁限制，
+    // 否则出错一次装甲就要在营地里挂 75+ 游戏分钟。
+    const corrective =
+      wantProbe?.skinId === LIFEWEAR_SKIN_ID && curBefore == null;
+    if (corrective && queueWant(living, id, wantProbe!)) {
+      cd[id] = living.gameMinutes;
+      changed.push(id);
+      continue;
+    }
     const cdNeed = wantProbe?.flirtHot
       ? OUTFIT_COOLDOWN_FLIRT_GAME_MIN
       : OUTFIT_COOLDOWN_GAME_MIN;
@@ -417,7 +457,7 @@ export function tryApplyEmotionOutfits(
       (want.skinId == null && cur == null) ||
       (want.skinId != null && cur === want.skinId);
     if (already) continue;
-    if (applyWant(living, id, want)) {
+    if (queueWant(living, id, want)) {
       cd[id] = living.gameMinutes;
       changed.push(id);
     }
@@ -434,7 +474,7 @@ export function forceSyncEmotionOutfitForDialogue(
   characterId: string,
 ): boolean {
   if (isDisciplineActiveFor(living, characterId)) return false;
-  if (shouldHoldAutoOutfit(living, characterId)) return false;
+  if (isBathAssistActiveFor(living, characterId)) return false;
   if (living.eventTempSkins?.[characterId]) return false;
   const want = suggestEmotionOutfit(save, living, characterId);
   if (!want) return false;
@@ -443,8 +483,11 @@ export function forceSyncEmotionOutfitForDialogue(
     (want.skinId == null && cur == null) ||
     (want.skinId != null && cur === want.skinId);
   if (already) return false;
-  // 浴室毛巾由世界同步处理；情绪选装不在开场瞬时扒掉/换上
-  if (want.skinId === SHOWER_SKIN_ID) return false;
+  // 装甲 → 生活服装属于纠正性回落，展示锁/换装锁不该拦住它
+  const corrective = want.skinId === LIFEWEAR_SKIN_ID && cur == null;
+  if (!corrective && shouldHoldAutoOutfit(living, characterId)) return false;
+  // 独自洗浴皮由世界同步处理；情绪选装不在开场瞬时扒掉/换上
+  if (isAloneBathSkinId(want.skinId)) return false;
   const q = schedulePresenceOutfitChange(
     living,
     characterId,
@@ -475,10 +518,14 @@ export function prepareSquadDefaultArmor(
   if (!living) return changed;
   if (!living.eventTempSkins) living.eventTempSkins = {};
   for (const id of squadIds) {
-    // 活动小黑屋会话必须先走 leaveDisciplineSession；不能由出征清理临时皮。
+    // 活动事件会话必须先正常结束；不能由出征清理临时皮。
     if (isDisciplineActiveFor(living, id)) continue;
+    if (isBathAssistActiveFor(living, id)) continue;
     if (living.eventTempSkins[id]) {
       delete living.eventTempSkins[id];
+      // 出征前更衣也算换装：排一次过程（战斗页看不到，但回来时状态自洽，
+      // 且不会在营地里出现"瞬间剥皮"）
+      forceScheduleOutfitChange(living, id, getCampWornSkinId(living, id), 3_500);
       const name = CHARACTER_MAP[id]?.name ?? id;
       pushMemory(living, id, {
         kind: 'event',

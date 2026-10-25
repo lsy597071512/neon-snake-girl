@@ -9,14 +9,14 @@ import { getCharacterSleepRoom } from '../data/campLayout';
 import { SLEEPWEAR_SKIN_ID, getCharacterSkin } from '../data/characterSkins';
 import { CHARACTER_MAP } from '../data/characters';
 import { setCyberHealth, getCyberHealth, CYBER_HEALTH_MAX } from '../systems/CyberHealthSystem';
-import { setCampWornSkin } from './campOutfit';
 import { setAgenda, clearAgenda, getAgenda } from './characterAgenda';
 import { snapAgentToRoom } from './campAgents';
 import { pushCampLog, pushMemory } from './memory';
-import { cancelPendingOutfitChange, shouldHoldAutoOutfit } from './outfitChangeProcess';
+import { forceScheduleOutfitChange, schedulePresenceOutfitChange, cancelPendingOutfitChange, shouldHoldAutoOutfit } from './outfitChangeProcess';
 import { resolveCharacterRoomId } from './livingState';
 import { getHour } from './worldClock';
 import { isDisciplineActiveFor } from './disciplineSession';
+import { adjustAffinity } from './relationship';
 import type { AiLivingSave, CharacterAgenda, LightStatusTag, LivingPresence } from './types';
 
 /** 一次完整睡眠 ≈ 现实 6 小时 */
@@ -40,6 +40,7 @@ export type CharacterSleepState = {
   disturbedAtMs?: number;
   disturbCount?: number;
   lastWakeReason?: string;
+  lastWakeAtMs?: number;
   lastEvalAtMs?: number;
   lastDreamEvalAtMs?: number;
 };
@@ -101,12 +102,21 @@ function hasSleepwear(characterId: string): boolean {
   return Boolean(getCharacterSkin(characterId, SLEEPWEAR_SKIN_ID));
 }
 
-/** 对话打开/睡眠相位：账本与立绘必须对齐睡衣（清换装队列以免挡住） */
+/** 对话打开/睡眠相位：账本与立绘必须对齐睡衣（走换装过程，不硬切） */
 export function syncSleepCampSkin(living: AiLivingSave, characterId: string): void {
   if (!isInSleepSystem(living, characterId)) return;
   if (!hasSleepwear(characterId)) return;
-  cancelPendingOutfitChange(living, characterId);
-  setCampWornSkin(living, characterId, SLEEPWEAR_SKIN_ID);
+  // 独占事件（舞蹈/安抚/浴室）进行中：睡衣会抢掉事件皮，必须让位
+  if (
+    living.danceSession?.active === true ||
+    living.anfuSession?.active === true ||
+    living.bathAssistSession?.active === true
+  ) {
+    return;
+  }
+  // 玩家已排队的换装优先（例如刚答应换装），睡眠心跳不得覆盖
+  if (shouldHoldAutoOutfit(living, characterId)) return;
+  forceScheduleOutfitChange(living, characterId, SLEEPWEAR_SKIN_ID, 4_000);
 }
 
 function forcePajamas(living: AiLivingSave, characterId: string): void {
@@ -114,7 +124,7 @@ function forcePajamas(living: AiLivingSave, characterId: string): void {
   // 对话换装排队中 / 展示锁 / 叙事锁：睡眠心跳不得抢回睡衣，更不得清空队列
   // （否则「准备入睡」时玩家让换性感装会口头答应、立绘永远停在睡衣）
   if (shouldHoldAutoOutfit(living, characterId)) return;
-  setCampWornSkin(living, characterId, SLEEPWEAR_SKIN_ID);
+  schedulePresenceOutfitChange(living, characterId, SLEEPWEAR_SKIN_ID);
 }
 
 function clearFatigue(living: AiLivingSave, characterId: string): void {
@@ -207,18 +217,21 @@ export function beginPrepareSleep(
 
 /**
  * 完全入睡：播睡眠皮肤；会话持续现实约 6 小时。
+ * fellAsleepAtMs：实际睡着的时间点（准备入睡的补偿：离线/迟到结算时不重新计满 6 小时）。
  */
 export function beginDeepSleep(
   living: AiLivingSave,
   characterId: string,
   now = Date.now(),
+  fellAsleepAtMs?: number,
 ): boolean {
   if (!hasSleepwear(characterId)) return false;
   const st = getSleepState(living, characterId);
   if (st.phase === 'asleep') return false;
+  const fell = fellAsleepAtMs ?? now;
   st.phase = 'asleep';
-  st.asleepStartedAtMs = now;
-  st.sleepUntilMs = now + SLEEP_REAL_DURATION_MS;
+  st.asleepStartedAtMs = fell;
+  st.sleepUntilMs = fell + SLEEP_REAL_DURATION_MS;
   st.disturbedAtMs = undefined;
   forcePajamas(living, characterId);
   cancelPendingOutreachMessages(living, characterId);
@@ -263,6 +276,171 @@ export function markSleepDisturbed(
 }
 
 /**
+ * 睡眠唤醒难度：深睡 + 高疲劳/低电力 + 首次被打扰 → 叫不醒（只能梦呓/翻身）。
+ * 连续尝试会降低难度（disturbCount 递增），符合「摇一摇也许能醒」的现实感。
+ */
+export function sleepWakeDifficulty(
+  living: AiLivingSave,
+  characterId: string,
+): { deep: boolean; wakeable: boolean; note: string } {
+  const st = getSleepState(living, characterId);
+  if (st.phase === 'preparing') {
+    return { deep: false, wakeable: true, note: '还没完全睡着，很容易叫醒' };
+  }
+  if (st.phase === 'disturbed') {
+    return { deep: false, wakeable: true, note: '已被吵醒过一次，再叫就能醒' };
+  }
+  if (st.phase !== 'asleep') return { deep: false, wakeable: true, note: '醒着' };
+  const cyber = getCyberHealth(living, characterId);
+  const fatigued = (living.characterStatus[characterId] ?? []).includes('fatigue');
+  const heavy = cyber <= 30 || fatigued;
+  const attempts = st.disturbCount ?? 0;
+  if (heavy && attempts === 0) {
+    return { deep: true, wakeable: false, note: '深度睡眠，第一声叫不醒' };
+  }
+  return {
+    deep: true,
+    wakeable: true,
+    note: heavy ? '深度睡眠，但连续摇晃能叫醒' : '浅睡，能被叫醒',
+  };
+}
+
+export type SleepInterruptOutcome = 'none' | 'woke' | 'kept_sleeping' | 'cant_wake';
+
+const SLEEP_TALK_STAY_RE =
+  /(继续睡|再睡|回去睡|接着睡|补觉|别吵|让我睡|我要睡|不聊了|晚安|你走吧|离开吧)/;
+const SLEEP_WANT_WAKE_RE = /(起来|不睡|醒着|睡不着|陪你|一起聊|起来聊|好好好我醒)/;
+
+/**
+ * 玩家聊天/邀请时的睡眠结算（由对白驱动，不硬锁）：
+ * - 准备入睡：愿意聊就离开睡眠流程（可以去换装/做别的），说想睡就留着
+ * - 深睡且叫不醒：只能梦呓，保持睡眠（连续尝试后才可能醒）
+ * - 能被叫醒：离开睡眠系统；深睡被叫醒有打扰代价（好感/状态）
+ */
+export function handleSleepInterruptFromTurn(
+  living: AiLivingSave,
+  characterId: string,
+  opts: { speech: string; interruptReaction?: string },
+): SleepInterruptOutcome {
+  if (!isInSleepSystem(living, characterId)) return 'none';
+  const st = getSleepState(living, characterId);
+  const speech = opts.speech ?? '';
+  const stay = SLEEP_TALK_STAY_RE.test(speech) && !SLEEP_WANT_WAKE_RE.test(speech);
+  const angry = opts.interruptReaction === 'annoyed' || opts.interruptReaction === 'angry';
+
+  if (st.phase === 'preparing') {
+    if (stay) return 'kept_sleeping';
+    leaveSleepSystem(living, characterId, {
+      reason: '准备入睡时被指挥官叫住，决定先不睡',
+      completed: false,
+    });
+    return 'woke';
+  }
+
+  if (st.phase === 'asleep' || st.phase === 'disturbed') {
+    const diff = sleepWakeDifficulty(living, characterId);
+    if (!diff.wakeable) {
+      // 叫不醒：只记一次尝试（下次难度下降），保持睡眠
+      st.disturbCount = (st.disturbCount ?? 0) + 1;
+      pushMemory(living, characterId, {
+        kind: 'event',
+        summary: '睡得太沉，指挥官的呼唤只换来几声梦呓',
+        importance: 3,
+      });
+      return 'cant_wake';
+    }
+    if (stay) {
+      markSleepDisturbed(living, characterId, '被吵醒后赌气继续睡');
+      return 'kept_sleeping';
+    }
+    leaveSleepSystem(living, characterId, {
+      reason: angry ? '被吵醒，带着起床气爬起来' : '被指挥官叫醒',
+      completed: false,
+    });
+    if (diff.deep || angry) {
+      // 打扰代价：好感下滑 + 状态标签（性格可在 LLM affection_change 里放大）
+      adjustAffinity(living, characterId, angry ? -3 : -2);
+      addStatus(living, characterId, angry ? 'anxiety_state' : 'fatigue');
+    }
+    return 'woke';
+  }
+  return 'none';
+}
+
+/**
+ * 被叫醒后又选择回去睡（她想睡就让她睡，但要付「白折腾一场」的好感代价）。
+ */
+export function maybeReturnToSleepFromSpeech(
+  living: AiLivingSave,
+  characterId: string,
+  speech: string,
+): boolean {
+  const st = getSleepState(living, characterId);
+  if (st.phase !== 'awake') return false;
+  if (!st.lastWakeReason) return false;
+  if (!hasSleepwear(characterId)) return false;
+  const t = speech ?? '';
+  if (!/(继续睡|再睡|回去睡|接着睡|补觉|我还困|要睡了|再躺一会)/.test(t)) return false;
+  if (/(不睡了|醒着|陪你|起来)/.test(t)) return false;
+  const now = Date.now();
+  beginPrepareSleep(living, characterId, now, '被叫醒后又回去睡');
+  beginDeepSleep(living, characterId, now);
+  adjustAffinity(living, characterId, -1);
+  pushMemory(living, characterId, {
+    kind: 'event',
+    summary: '被折腾醒后又睡回去（有点不爽，好感小幅下滑）',
+    importance: 4,
+  });
+  return true;
+}
+
+/**
+ * 叫醒后指挥官就走：她大概率会窝回床上继续睡（白折腾一场 → 好感小幅下降）。
+ * 只在刚被叫醒、且电力仍不足时发生；自然醒/睡满不会触发。
+ */
+export function sleepBackIfLeftAloneAfterWake(
+  living: AiLivingSave,
+  characterId: string,
+): boolean {
+  const st = getSleepState(living, characterId);
+  if (st.phase !== 'awake') return false;
+  if (!st.lastWakeReason) return false;
+  if (!/叫醒|吵醒|打扰/.test(st.lastWakeReason)) return false;
+  // 只处理「刚被叫醒」的窗口（现实 30 分钟内），避免隔了很久又莫名回床
+  if (st.lastWakeAtMs && Date.now() - st.lastWakeAtMs > 30 * 60 * 1000) return false;
+  if (!hasSleepwear(characterId)) return false;
+  if (isDisciplineActiveFor(living, characterId)) return false;
+  // 正在独占事件（舞蹈/安抚/浴室）不可能同时去睡——先结束事件再谈睡觉
+  if (
+    living.danceSession?.active === true ||
+    living.anfuSession?.active === true ||
+    living.bathAssistSession?.active === true
+  ) {
+    return false;
+  }
+  const cyber = getCyberHealth(living, characterId);
+  const fatigued = (living.characterStatus[characterId] ?? []).includes('fatigue');
+  if (cyber >= 72 && !fatigued) return false;
+  const now = Date.now();
+  beginPrepareSleep(living, characterId, now, '被叫醒后指挥官走了，又睡回去');
+  beginDeepSleep(living, characterId, now);
+  st.lastWakeReason = undefined;
+  adjustAffinity(living, characterId, -1);
+  addStatus(living, characterId, 'fatigue');
+  pushCampLog(living, {
+    text: `${CHARACTER_MAP[characterId]?.name ?? characterId} 被叫醒后又睡了回去（好感 -1）`,
+    source: 'system',
+    characterIds: [characterId],
+  });
+  pushMemory(living, characterId, {
+    kind: 'event',
+    summary: '被叫醒、聊了两句指挥官就走，她又睡回去了（白折腾一场，好感小幅下滑）',
+    importance: 4,
+  });
+  return true;
+}
+
+/**
  * 脱离睡眠系统：必须同步为睡衣站立；可带「被吵醒/自然醒」理由。
  * completed=true 时记今日已睡并恢复电力。
  */
@@ -284,10 +462,13 @@ export function leaveSleepSystem(
   const sleep = getCharacterSleepRoom(characterId);
   st.phase = 'awake';
   st.lastWakeReason = opts.reason;
+  st.lastWakeAtMs = opts.now ?? Date.now();
   st.prepareStartedAtMs = undefined;
   st.asleepStartedAtMs = undefined;
   st.sleepUntilMs = undefined;
   st.disturbedAtMs = undefined;
+  // 醒了就不会被立刻重新判定入睡（避免「刚醒又被作息塞回床上」）
+  st.lastEvalAtMs = opts.now ?? Date.now();
   if (completed) {
     st.lastCompletedDayIndex = living.dayIndex;
     clearFatigue(living, characterId);
@@ -409,17 +590,8 @@ export function applySleepPresenceOverride(
 ): LivingPresence {
   const st = getSleepState(living, characterId);
   if (st.phase === 'awake') {
-    if (sleptToday(living, st) && base.activity === 'sleeping') {
-      const sleep = getCharacterSleepRoom(characterId);
-      return {
-        ...base,
-        roomId: sleep.id,
-        locationId: sleep.sceneId,
-        activity: 'rest',
-        behavior: '睡醒后仍穿着星夜睡衣歇着',
-        label: `歇息 · ${sleep.floor}楼·${sleep.label}`,
-      };
-    }
+    // 醒着就是醒着：位置/活动交给作息与议程（不硬锁在床上），
+    // 否则「叫醒后又被拖回卧室睡」——人醒了完全可以去做别的。
     return base;
   }
   const sleep = getCharacterSleepRoom(characterId);
@@ -462,27 +634,29 @@ export function describeSleepForPrompt(
     st.sleepUntilMs != null ? Math.max(0, st.sleepUntilMs - Date.now()) : 0;
   const remainH = (remainMs / 3_600_000).toFixed(1);
   const cyber = getCyberHealth(living, characterId);
+  const diff = sleepWakeDifficulty(living, characterId);
   const lines = [
-    '【睡眠系统·硬规则】',
-    '- 每个角色每天需要睡眠来恢复电力；一整觉约等于现实 6 小时。',
-    '- 游戏日/夜都可能入睡，夜间几率更大。',
-    '- 准备入睡 → 必须换上星夜睡衣（站立 idle）；完全入睡 → 立绘切睡眠循环（pifu02_sleep）。',
-    '- 睡眠中仍可被指挥官聊天或其他人打扰：你会很气愤或很疲惫（被打扰状态），interrupt_reaction 自行判定 welcome/tolerate/annoyed/angry。',
-    '- 也可因做梦惊醒、环境吵闹等主动取消睡眠；脱离睡眠后立绘/穿搭必须仍是星夜睡衣站立，禁止立刻裸回装甲。',
-    `- 你当前义体健康/电力感约 ${cyber}/100；今日${sleptToday(living, st) ? '已完成过一整觉' : '尚未完成一整觉'}。`,
+    '【睡眠系统·你是活人不是开关】',
+    '- 每个角色每天需要睡眠恢复电力；一整觉约等于现实 6 小时。准备入睡 → 换星夜睡衣站立；完全入睡 → 睡眠循环立绘。',
+    '- 睡眠不是死锁：被打扰时由你决定——可以赌气继续睡、可以醒来一起聊天、也可以答应换装/去大厅/去安抚室等别的事（答应就会醒）。',
+    '- 也可以说自己困了、回房再睡；被叫醒又睡回去会让指挥官白折腾，好感会小幅下降。',
+    `- 义体健康/电力感约 ${cyber}/100；今日${sleptToday(living, st) ? '已完成过一整觉' : '尚未完成一整觉'}。`,
   ];
   if (st.phase === 'preparing') {
-    lines.push('【此刻相位】准备入睡：已穿星夜睡衣站立，尚未完全睡着；玩家所见是睡衣 idle，不是睡眠循环。');
+    lines.push('【此刻相位】准备入睡：已穿星夜睡衣站立，还没睡着。玩家找你说话，你可以选择不睡了陪他，也可以说「我要睡了」。');
   } else if (st.phase === 'asleep') {
     lines.push(
-      `【此刻相位】完全入睡：玩家所见为睡眠循环立绘。预计还需约现实 ${remainH} 小时才会自然醒。被找聊天=被打扰。`,
+      `【此刻相位】完全入睡：睡眠循环立绘，预计还要约 ${remainH} 小时自然醒。${diff.note}。`,
+      diff.wakeable
+        ? '- 被找聊天/邀请时你可以醒来（会带起床气或迷糊），也可以只是翻个身继续睡。'
+        : '- 你睡得很沉：本轮只能梦呓/翻身，不得起身、不得答应任何活动；指挥官的呼唤叫不醒你。',
     );
   } else if (st.phase === 'disturbed') {
     lines.push(
-      `【此刻相位】被打扰：仍在睡眠会话内（可继续睡或气得醒来）。打扰次数 ${st.disturbCount ?? 1}。语气应带烦/累；想结束睡眠可在对白里醒来。`,
+      `【此刻相位】被打扰：人被吵醒还赖在床上，打扰次数 ${st.disturbCount ?? 1}。语气带烦/累；可以继续睡，也可以真的爬起来。`,
     );
   } else if (st.lastWakeReason) {
-    lines.push(`【最近醒来】${st.lastWakeReason}`);
+    lines.push(`【最近醒来】${st.lastWakeReason}（已醒着，可以正常聊天/做别的事，也可说困了再回去睡）。`);
   }
   return lines.join('\n');
 }
@@ -497,8 +671,15 @@ export function tickSleepSystem(
 ): void {
   ensureSleepFields(living);
   for (const id of ownedIds) {
-    // 活动小黑屋会话独占地点与临时皮；睡眠不得抢回卧室或睡衣。
+    // 活动事件会话独占地点与临时皮；睡眠不得抢回卧室或睡衣。
     if (isDisciplineActiveFor(living, id)) continue;
+    if (
+      (living.danceSession?.active && living.danceSession.characterId === id) ||
+      (living.anfuSession?.active && living.anfuSession.characterId === id) ||
+      (living.bathAssistSession?.active && living.bathAssistSession.characterId === id)
+    ) {
+      continue;
+    }
     if (!hasSleepwear(id)) continue;
     const st = getSleepState(living, id);
 
@@ -506,7 +687,8 @@ export function tickSleepSystem(
       forcePajamas(living, id);
       const started = st.prepareStartedAtMs ?? now;
       if (now - started >= SLEEP_PREPARE_REAL_MS) {
-        beginDeepSleep(living, id, now);
+        // 补偿：她真正入睡的时间点是「准备到点」，不是这次结算的 now
+        beginDeepSleep(living, id, now, started + SLEEP_PREPARE_REAL_MS);
       }
       continue;
     }

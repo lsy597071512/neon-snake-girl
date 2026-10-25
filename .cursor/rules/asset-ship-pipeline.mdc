@@ -9,6 +9,13 @@ alwaysApply: true
 
 1. 源 `tex/` 只读，产物只进 `tex-ship/` → `dist/tex/`
 2. `npm run build` / `build:apk` / `cap:sync` 已内置 build-ship + 门禁；不得绕过
-3. 已优化资源（缓存命中）不得二次压缩；改规格须升 `SHIP_POLICY_VERSION`（当前 P2：`2026-08-23-p2-mobile-v2`）
+3. 已优化资源（缓存命中）不得二次压缩；改规格须升 `SHIP_POLICY_VERSION`（当前 P2：`2026-09-20-p2-mobile-v3.4-drop-juese-mp4`）
 4. 减弱优化或换平台前须用户明确授权，并先更新 `docs/asset-ship-pipeline.md`
 5. 打包优化仅改 `scripts/` 与 `tex-ship/`，**禁止**为压缩修改 `src/` 玩法逻辑或资源路径
+6. **改了 `tex/` 美术资源后必须让 `tex → tex-ship → dist` 三方一致**：
+   - `npm run dev` 与 `npm run build` 已分别内置 `predev` / `prebuild` 自动守卫，无需手工记忆；
+   - 校验用 `npm run tex:check`（不同步则非零退出），强制重建用 `npm run tex:sync:force`；
+   - **禁止**裸跑 `vite build` 绕过 `prebuild`，也禁止手工拷贝 `tex/` 进 `tex-ship/` / `dist/`。
+7. **0 字节资源视为事故，必须立即修复**：源文件为空时重跑 ship 无法修复
+   （空图/空立绘会直接进包，表现为「角色换了衣服但画面空白」）。
+   遇到云盘同步留下的 `X.ext` 为空 + `X(1).ext` 为真身时，先手工回填真身再同步。

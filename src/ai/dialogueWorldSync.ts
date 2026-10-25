@@ -15,6 +15,10 @@ import { CAMP_ROOM_MAP } from '../data/campLayout';
 import { CHARACTER_MAP } from '../data/characters';
 import type { SaveData } from '../types';
 import { snapAgentToRoom } from './campAgents';
+import { isDanceActiveFor } from './danceSession';
+import { captureDialogueSceneSnapshot, commitDialogueSceneSnapshot } from './dialogueSceneSync';
+import { planTravel } from './travel';
+import { BATH_ASSIST_ROOM_ID, isBathAssistActiveFor } from './bathAssistSession';
 import { applyBatheShowerSkins } from './campEvents/campEventEffects';
 import {
   getAgenda,
@@ -28,10 +32,10 @@ import {
   coerceActivityToRoom,
   defaultActivityForRoom,
   inferPresentRoomFromSpeech,
+  inferRoomFromText,
 } from './dialoguePresence';
 import { resolveCharacterRoomId, resolvePresence } from './livingState';
-import { pushMemory } from './memory';
-import {
+import { pushMemory } from './memory';import {
   isMidChangeSpeech,
   shouldHoldAutoOutfit,
   holdOutfitForNarrative,
@@ -43,8 +47,8 @@ import {
 import { preloadRoomSceneImage } from './assetPreload';
 import { isInSleepSystem, tryWakeFromSpeech } from './sleepSystem';
 import { declinesOutfitChange } from './outfitChangeProcess';
+import { recordPlayerActivityRequest } from './activityFatigue';
 import { disciplineBodyBehavior, getDisciplineSession, isDisciplineActiveFor } from './disciplineSession';
-import { setCampWornSkin } from './campOutfit';
 import type {
   AiLivingSave,
   CharacterActivity,
@@ -135,8 +139,17 @@ export function syncOutfitToCurrentPresence(
   characterId: string,
   speech = '',
 ): { changed: boolean; msg: string } {
-  // 调教专用临时皮由 disciplineSession 持有，普通场景换装不可清除或改写。
+  // 独占临时皮由会话持有，普通场景换装不可清除或改写。
   if (isDisciplineActiveFor(living, characterId)) {
+    return { changed: false, msg: '' };
+  }
+  const anfuSession = living.anfuSession;
+  if (anfuSession?.active && anfuSession.characterId === characterId) {
+    // 安抚室三相皮由会话独占，任何场景/情绪换装都必须让位
+    return { changed: false, msg: '' };
+  }
+  // 舞蹈事件：舞装由会话独占（换装相/待机皮/演出皮），场景同步不得插手
+  if (isDanceActiveFor(living, characterId)) {
     return { changed: false, msg: '' };
   }
   if (shouldHoldAutoOutfit(living, characterId)) {
@@ -153,18 +166,19 @@ export function syncOutfitToCurrentPresence(
     holdOutfitForNarrative(living, characterId, speech.slice(0, 40));
   }
 
-  // 浴室 → 蒸汽毛巾。有中间过程叙事时改走延时协议（立绘停在旧衣，等「换好了」收尾）
+  // 浴室 → 浴巾/泡澡服。任何时候都走"先换衣再显形"的临时皮排队（不瞬间挂浴巾）
   if (roomId === 'room_1f_bath') {
     if (has(SHOWER_SKIN_ID)) {
       const alreadyShower =
         temp?.skinId === SHOWER_SKIN_ID || worn === SHOWER_SKIN_ID;
       if (!alreadyShower) {
-        if (midChange) {
-          const q = schedulePresenceOutfitChange(living, characterId, SHOWER_SKIN_ID);
-          return { changed: q.queued, msg: q.msg ? `对齐浴室（换装中）：${q.msg}` : '' };
-        }
         applyBatheShowerSkins(save, living);
-        return { changed: true, msg: '对齐浴室：蒸汽毛巾' };
+        return {
+          changed: true,
+          msg: midChange
+            ? '对齐浴室：正在换洗浴外覆（换装中）'
+            : '对齐浴室：换上浴巾/泡澡服（换装中）',
+        };
       }
     }
     return { changed: false, msg: '' };
@@ -207,15 +221,12 @@ export function syncOutfitToCurrentPresence(
 
   const kind = CAMP_ROOM_MAP[roomId]?.kind;
   const act = String(presence.activity || '');
-  // 仅军械/塔楼/机械/执勤活动 → 默认装甲；大厅/商店/院子闲逛不强制装甲
-  const needArmor =
-    kind === 'armory' ||
-    kind === 'tower' ||
-    kind === 'mechanical' ||
-    act === 'maintain' ||
-    act === 'guard' ||
-    act === 'patrol' ||
-    (kind === 'yard' && (act === 'busy' || act === 'maintain'));
+  // 仅军械/塔楼/机械间，或在其中执勤/点检 → 默认装甲。
+  // 大厅/院子/宿舍里「随手修点东西(maintain)」不算执勤：营地装甲占比必须很低。
+  const onDutyActivity = act === 'maintain' || act === 'guard' || act === 'patrol';
+  const dutyPlace =
+    kind === 'armory' || kind === 'tower' || kind === 'mechanical' || roomId === 'room_1f_armory';
+  const needArmor = dutyPlace && onDutyActivity;
 
   if (needArmor) {
     if (worn) {
@@ -251,12 +262,17 @@ function applyWorldIntentOutfit(
   intent: LlmDialogueResult['world_intent'],
 ): string | null {
   if (!intent || typeof intent !== 'object') return null;
+  const anfuSession = living.anfuSession;
+  if (anfuSession?.active && anfuSession.characterId === characterId) return null;
+  if (isDanceActiveFor(living, characterId)) return null;
   const action = intent.outfit_action;
   if (!action) return null;
 
   if (action === 'start') {
     const want = normalizeSkinChangeWant(characterId, intent.target_skin ?? '');
     if (!want) return null;
+    // 重复活动厌倦：今天第 N 次让她换装（超耐心阈值会打厌倦脉冲）
+    recordPlayerActivityRequest(living, characterId, 'outfit');
     const q = schedulePresenceOutfitChange(living, characterId, want);
     return q.msg || null;
   }
@@ -307,9 +323,18 @@ function applyMoveAndOutfit(
       source: 'llm',
     };
     setAgenda(living, characterId, agenda);
-    snapAgentToRoom(characterId, roomId, { activity, behavior });
+    // 移动要有路程：登记行程，到点才落点/切场景（不再瞬移）
+    const travel = planTravel(living, characterId, roomId, curRoom, {
+      activity,
+      behavior,
+      reason: 'dialogue_move',
+      arriveBehavior: behavior,
+    });
+    if (!travel.started) {
+      snapAgentToRoom(characterId, roomId, { activity, behavior });
+    }
     moved = true;
-    bits.push(`地点→${CAMP_ROOM_MAP[roomId]?.label ?? roomId}`);
+    bits.push(`地点→${CAMP_ROOM_MAP[roomId]?.label ?? roomId}（路上约 ${Math.round(travel.etaMs / 1000)} 秒）`);
     // 切景意图落地前预热目标房间场景图（零加载换景）
     preloadRoomSceneImage(roomId, living);
   } else if (target.roomId === curRoom) {
@@ -377,6 +402,45 @@ function applyMoveAndOutfit(
 }
 
 /**
+ * 指挥官指路 → 角色答应后要「真的走过去」。
+ * 历史 BUG：玩家说「一起去大厅看看吧」，角色嘴上答应「走吧」，但没有任何
+ * world_intent.move_to，于是人一直待在原地反复说「等我把热可可放好就去」。
+ * 这里在 AI **没有**自己申报 move_to 时兜底：只要玩家点了目的地 + 角色同意
+ * （且没有拒绝/没声称在别处），就用 planTravel 走同一套走路路线。
+ */
+function resolvePlayerDirectedMove(
+  characterId: string,
+  playerMessage: string | undefined,
+  dialogue: string,
+  action: string | undefined,
+  curRoom: string,
+): { roomId: string; reason: string } | null {
+  const pm = (playerMessage || '').trim();
+  if (!pm) return null;
+  const dest = inferRoomFromText(pm, characterId);
+  if (!dest || dest === curRoom) return null;
+  const mouth = `${dialogue} ${action ?? ''}`;
+  // 角色明确拒绝 / 拖延（待会/等会/回头/先不）：不搬
+  if (/不(?:想|去|行|了)|算了|改天|下次|先不|没空|待会|等会|等一下|回头|之后(?:再说|再去)|要不(?:先)?别/.test(mouth)) {
+    return null;
+  }
+  // 角色声称人在别处且与目的地不符：让现有的房间推断去处理，不强行搬
+  const claimed = inferPresentRoomFromSpeech(mouth, characterId, curRoom);
+  if (claimed.roomId && claimed.roomId !== curRoom && claimed.roomId !== dest) return null;
+  // 同意 / 承诺要过去：「走吧/一起去/好呀/放好热可可我就过去/收拾一下就去」都算。
+  const agrees =
+    /走吧|一起去|去(?:吧|看看|逛逛|一趟|那边)|好的?|好呀|行|可以|没问题|嗯+[，,。]?|这就(?:去|过去)|出发|过去看看|去看看/.test(
+      mouth,
+    ) ||
+    /(?:放好|放下|收好|收拾(?:好|一下)?|换(?:好|完|一下)(?:衣服|衣裳|装)?|整理(?:好|一下)?|拿上|带上)?.{0,8}(?:就|马上|这就|立刻)(?:过去|过去看看|去|走|到|来)/.test(
+      mouth,
+    ) ||
+    /马上(?:就)?(?:过去|到|来)|我(?:这就|马上|立刻)(?:过去|来)/.test(mouth);
+  if (!agrees) return null;
+  return { roomId: dest, reason: 'player_directed_move' };
+}
+
+/**
  * 本轮对白结束后：身体立刻跟 AI「此刻」走（地点+皮肤）。
  */
 export function syncDialogueWorldRealtime(
@@ -394,7 +458,7 @@ export function syncDialogueWorldRealtime(
     desire_next?: LlmDialogueResult['desire_next'];
   },
 ): DialogueWorldSyncResult {
-  // 小黑屋是物理锁定场景：模型对白中的睡觉、移动、换装描述只属于叙事，
+  // 物理锁定场景占位（历史兼容）：模型对白中的睡觉、移动、换装描述只属于叙事，
   // 不能反向修改已经落地的房间/皮肤/活动状态。
   if (isDisciplineActiveFor(living, characterId)) {
     const presence = resolvePresence(characterId, living);
@@ -415,6 +479,65 @@ export function syncDialogueWorldRealtime(
     };
   }
 
+  // 安抚室会话：房间/皮肤/活动全部由会话独占——模型对白里的离开、换衣、
+  // 回房只属于叙事，不得反向改世界（否则会「满值后突然被切回大厅」）。
+  const anfuSession = living.anfuSession;
+  if (anfuSession?.active && anfuSession.characterId === characterId) {
+    const presence = resolvePresence(characterId, living);
+    writeBodyAnchor(living, characterId, presence.roomId, 'play', '在安抚室和指挥官玩棉花游戏');
+    return {
+      moved: false,
+      skinned: false,
+      roomId: presence.roomId,
+      activity: 'play',
+      msg: '',
+    };
+  }
+
+  // 浴室互动会话：房间锁在浴室，洗澡中不可能跑去大厅跳舞/去安抚室。
+  // 模型对白里的「好，去大厅」只属于叙事，不得反向把人搬走（否则事件互相踩踏）。
+  if (isBathAssistActiveFor(living, characterId)) {
+    const presence = resolvePresence(characterId, living);
+    const behavior = '在浴室与指挥官一起洗浴';
+    snapAgentToRoom(characterId, BATH_ASSIST_ROOM_ID, { activity: 'bathe', behavior });
+    writeBodyAnchor(living, characterId, BATH_ASSIST_ROOM_ID, 'bathe', behavior);
+    return {
+      moved: presence.roomId !== BATH_ASSIST_ROOM_ID,
+      skinned: false,
+      roomId: BATH_ASSIST_ROOM_ID,
+      activity: 'bathe',
+      msg: '',
+    };
+  }
+
+  // 舞蹈事件会话：大厅位置/舞装由会话独占——模型对白里的回房、换衣、睡觉只属于叙事，
+  // 不得反向改世界（历史 BUG：答应跳舞后模型填 move_to 卧室/换睡衣 → 人不在大厅，舞蹈永远开不了）。
+  if (isDanceActiveFor(living, characterId)) {
+    const s = living.danceSession!;
+    const behavior =
+      s.phase === 'dressing'
+        ? '在大厅换舞装，准备跳舞'
+        : s.phase === 'dancing'
+          ? s.mode === 'co'
+            ? '在大厅与指挥官共舞'
+            : '在大厅独自起舞'
+          : '在大厅待机，准备跳舞';
+    snapAgentToRoom(characterId, s.hallRoomId, { activity: 'play', behavior });
+    writeBodyAnchor(living, characterId, s.hallRoomId, 'play', behavior);
+    commitDialogueSceneSnapshot(
+      living,
+      characterId,
+      captureDialogueSceneSnapshot(living, characterId),
+    );
+    return {
+      moved: false,
+      skinned: false,
+      roomId: s.hallRoomId,
+      activity: 'play',
+      msg: '',
+    };
+  }
+
   const speechAll = `${turn.dialogue} ${turn.action ?? ''} ${turn.inner_thought ?? ''} ${turn.scene_beat ?? ''} ${turn.playerMessage ?? ''}`;
   const charSpeechOnly = `${turn.dialogue} ${turn.action ?? ''} ${turn.inner_thought ?? ''} ${turn.scene_beat ?? ''}`;
   const outfitRefused = declinesOutfitChange(turn.dialogue, turn.action);
@@ -423,7 +546,7 @@ export function syncDialogueWorldRealtime(
 
   const wasSleeping = isInSleepSystem(living, characterId);
   const curRoom = resolveCharacterRoomId(characterId, living);
-  const target = resolveTargetRoom(
+  let target = resolveTargetRoom(
     characterId,
     {
       dialogue: turn.dialogue,
@@ -433,6 +556,17 @@ export function syncDialogueWorldRealtime(
     },
     curRoom,
   );
+  // 指挥官指路 + 角色答应、但模型没申报 move_to：兜底走同一套走路路线，
+  // 避免"嘴上说走、身体不动、下一轮又重复放热可可"。
+  if (!target) {
+    target = resolvePlayerDirectedMove(
+      characterId,
+      turn.playerMessage,
+      turn.dialogue,
+      turn.action,
+      curRoom,
+    );
+  }
   let result: DialogueWorldSyncResult;
   if (!target) {
     // intent 先行（同 applyMoveAndOutfit 的顺序理由）
@@ -473,16 +607,16 @@ export function syncDialogueWorldRealtime(
     });
   }
 
-  // 刚脱离睡眠系统：强制星夜睡衣站立（禁止裸回装甲）
+  // 刚脱离睡眠系统：换星夜睡衣站立（禁止裸回装甲；走换装过程不硬切）
   if (wasSleeping && !isInSleepSystem(living, characterId)) {
     if (getCharacterSkins(characterId).some((s) => s.id === SLEEPWEAR_SKIN_ID)) {
-      setCampWornSkin(living, characterId, SLEEPWEAR_SKIN_ID);
+      schedulePresenceOutfitChange(living, characterId, SLEEPWEAR_SKIN_ID);
       result = {
         ...result,
         skinned: true,
         msg: result.msg
-          ? `${result.msg}；脱离睡眠→星夜睡衣`
-          : '脱离睡眠→同步星夜睡衣',
+          ? `${result.msg}；脱离睡眠→换星夜睡衣`
+          : '脱离睡眠→换星夜睡衣',
       };
     }
   }
@@ -506,6 +640,8 @@ export function syncDialogueWorldFromPartialSpeech(
 ): DialogueWorldSyncResult | null {
   const text = (partialDialogue ?? '').trim();
   if (text.length < 4) return null;
+  const anfuSession = living.anfuSession;
+  if (anfuSession?.active && anfuSession.characterId === characterId) return null;
 
   // 只取已说完的整句（最后一句未说完不算——半句误切是老坑）
   const completed = text.split(/[。！？!?…\n]/).slice(0, -1).join('。');
@@ -528,11 +664,18 @@ export function syncDialogueWorldFromPartialSpeech(
   if (!mentioned) return null;
 
   const activity = defaultActivityForRoom(inferred.roomId, completed);
-  snapAgentToRoom(characterId, inferred.roomId, {
+  const behavior = behaviorForRoom(inferred.roomId, activity, '乐观同步');
+  // 她说「我现在在X」但身体不在：按"正在过去"处理，走完才算到（不瞬移）
+  const travel = planTravel(living, characterId, inferred.roomId, curRoom, {
     activity,
-    behavior: behaviorForRoom(inferred.roomId, activity, '乐观同步'),
+    behavior,
+    reason: 'dialogue_move',
+    arriveBehavior: behavior,
   });
-  writeBodyAnchor(living, characterId, inferred.roomId, activity, behaviorForRoom(inferred.roomId, activity, '乐观同步'));
+  if (!travel.started) {
+    snapAgentToRoom(characterId, inferred.roomId, { activity, behavior });
+    writeBodyAnchor(living, characterId, inferred.roomId, activity, behavior);
+  }
   preloadRoomSceneImage(inferred.roomId, living);
   return {
     moved: true,

@@ -12,6 +12,13 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { shouldSkipTexShip, formatMb, normRel } from './asset-ship-filter.mjs';
 import {
+  tierForShipRel,
+  MERGE_REMOTE_TIERS,
+  TIER_P0,
+  TIER_P1,
+  TIER_P2,
+} from './asset-tiers.config.mjs';
+import {
   specForRel,
   matteKeyForRel,
   RASTER_EXTS,
@@ -31,6 +38,7 @@ const TEX_SRC = path.join(root, 'tex');
 const TEX_SHIP = path.join(root, 'tex-ship');
 const CACHE_PATH = path.join(TEX_SHIP, '.ship-cache.json');
 const MANIFEST_NAME = 'ship-manifest.json';
+const CDN_MANIFEST_NAME = 'ship-manifest-cdn.json';
 
 const CONCURRENCY = Math.max(2, Math.min(6, Number(process.env.SHIP_CONCURRENCY) || 4));
 const FORCE = process.argv.includes('--force');
@@ -45,6 +53,26 @@ function fileSha1(abs) {
   const hash = crypto.createHash('sha1');
   hash.update(fs.readFileSync(abs));
   return hash.digest('hex');
+}
+
+/** 流式 sha256：产物里有 GB 级视频，不能 readFileSync 整个读进内存 */
+function fileSha256Stream(abs) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const rs = fs.createReadStream(abs);
+    rs.on('error', reject);
+    rs.on('data', (chunk) => hash.update(chunk));
+    rs.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+/** 缓存命中必须同时满足：存在 + 非 0 字节（0 字节产物一旦进缓存会永久黑图，见 2026-10 road01 事故） */
+function isUsableOut(absOut) {
+  try {
+    return fs.existsSync(absOut) && fs.statSync(absOut).size > 0;
+  } catch {
+    return false;
+  }
 }
 
 function loadCache() {
@@ -114,6 +142,13 @@ async function encodeWebp(absSrc, rel, absOut, spec) {
       smartSubsample: true,
     })
     .toFile(absOut);
+
+  // 产出必须是真实字节；0 字节会被 manifest 固化并打进包，导致目标机型整片黑图
+  const produced = fs.statSync(absOut).size;
+  if (produced === 0) {
+    fs.unlinkSync(absOut);
+    throw new Error('webp encode produced 0 bytes');
+  }
 }
 
 function cacheEntry(sha1, outRel, outBytes, action, specVersion) {
@@ -149,6 +184,21 @@ async function main() {
 
   const included = all.filter((f) => !shouldSkipTexShip(f.rel).skip);
   const excluded = all.length - included.length;
+
+  // 源资产 0 字节：云盘同步/中断拷贝常留下「X.ext 为空 + X(1).ext 为真身」的组合。
+  // 这类源无法靠重跑 ship 修复（复制空文件还是空），必须显式失败并指名，
+  // 否则空图/空立绘会一路固化进 manifest 与 dist，表现为「角色换了衣服但没显示」。
+  const zeroByteSources = included.filter((f) => f.size === 0);
+  if (zeroByteSources.length) {
+    for (const f of zeroByteSources) {
+      const dup = f.rel.replace(/(\.[^.]+)$/, '(1)$1');
+      const hint = fs.existsSync(path.join(TEX_SRC, dup)) ? `（疑似真身在 ${dup}）` : '';
+      console.error(`[build-tex-ship] 源文件为 0 字节: ${f.rel}${hint}`);
+    }
+    throw new Error(
+      `${zeroByteSources.length} 个源文件为 0 字节，已中止。请先修复 tex/ 下的源资产再重新打包。`,
+    );
+  }
 
   const cache = FORCE ? {} : loadCache();
   /** @type {Record<string, string>} */
@@ -189,7 +239,7 @@ async function main() {
           prev.sha1 === sha1 &&
           prev.outRel &&
           prev.policyVersion === SHIP_POLICY_VERSION &&
-          fs.existsSync(path.join(TEX_SHIP, prev.outRel))
+          isUsableOut(path.join(TEX_SHIP, prev.outRel))
         ) {
           const outBytes = fs.statSync(path.join(TEX_SHIP, prev.outRel)).size;
           map[file.rel] = prev.outRel;
@@ -235,7 +285,7 @@ async function main() {
           prev.outRel === file.rel &&
           prev.policyVersion === SHIP_POLICY_VERSION &&
           prev.specVersion === VIDEO_SPEC_VERSION &&
-          fs.existsSync(absOut)
+          isUsableOut(absOut)
         ) {
           const outBytes = fs.statSync(absOut).size;
           nextCache[file.rel] = cacheEntry(sha1, file.rel, outBytes, 'cache', VIDEO_SPEC_VERSION);
@@ -268,7 +318,7 @@ async function main() {
           prev.sha1 === sha1 &&
           prev.outRel === file.rel &&
           prev.policyVersion === SHIP_POLICY_VERSION &&
-          fs.existsSync(absOut)
+          isUsableOut(absOut)
         ) {
           const outBytes = fs.statSync(absOut).size;
           nextCache[file.rel] = cacheEntry(sha1, file.rel, outBytes, 'cache');
@@ -299,7 +349,9 @@ async function main() {
           prev.sha1 === sha1 &&
           prev.outRel === file.rel &&
           prev.policyVersion === SHIP_POLICY_VERSION &&
-          fs.existsSync(absOut)
+          // 必须用 isUsableOut 而不是 existsSync：缓存条目一旦记录过 0 字节产物，
+          // 只判存在会让坏状态永久固化（角色立绘 webm 为 0 → 立绘空白但仍算命中）
+          isUsableOut(absOut)
         ) {
           nextCache[file.rel] = cacheEntry(sha1, file.rel, fs.statSync(absOut).size, 'cache');
           passthroughBytes += fs.statSync(absOut).size;
@@ -385,6 +437,49 @@ async function main() {
   }
   cleanShip(TEX_SHIP, '');
 
+  // —— P3：CDN 分层清单（每文件 sha256 + size + tier）——
+  // 用途：上传 R2 的清单 + 客户端下载管理器/版本门比对依据。
+  // key 为产物相对路径（outRel，运行时 ./tex/ 下同路径）；含 P0 文件，
+  // 客户端可用它做 P0 资源的弱更补丁（本地缓存覆盖包内旧版）。
+  /** @type {Record<string, { size: number, sha256: string, tier: string }>} */
+  const cdnFiles = {};
+  const tierStats = {
+    [TIER_P0]: { files: 0, bytes: 0 },
+    [TIER_P1]: { files: 0, bytes: 0 },
+    [TIER_P2]: { files: 0, bytes: 0 },
+  };
+  {
+    const outRels = [...new Set(Object.values(nextCache).map((c) => normRel(c.outRel)))].sort();
+    for (const outRel of outRels) {
+      const absOut = path.join(TEX_SHIP, outRel);
+      if (!isUsableOut(absOut)) continue;
+      const size = fs.statSync(absOut).size;
+      const sha256 = await fileSha256Stream(absOut);
+      const tier = tierForShipRel(outRel);
+      cdnFiles[outRel] = { size, sha256, tier };
+      tierStats[tier].files += 1;
+      tierStats[tier].bytes += size;
+    }
+  }
+  // 内容指纹：产物集合不变则不变，客户端用它秒判「资源是否有更新」
+  const contentHash = crypto
+    .createHash('sha256')
+    .update(JSON.stringify(cdnFiles))
+    .digest('hex')
+    .slice(0, 16);
+  const cdnManifest = {
+    version: 1,
+    policy: 'P3-cdn-split',
+    shipPolicyVersion: SHIP_POLICY_VERSION,
+    mergeRemoteTiers: MERGE_REMOTE_TIERS,
+    generatedAt: new Date().toISOString(),
+    contentHash,
+    note: 'keys 为 tex-ship 产物相对路径；tier: P0=APK首包 P1=登录后批量下载 P2=按需懒加载。mergeRemoteTiers=true 时 P1+P2 合并为一个远端包（测试期）。',
+    tiers: tierStats,
+    files: cdnFiles,
+  };
+  fs.writeFileSync(path.join(TEX_SHIP, CDN_MANIFEST_NAME), JSON.stringify(cdnManifest), 'utf8');
+
   const manifest = {
     version: 2,
     policy: 'P2-mobile-ship',
@@ -427,6 +522,12 @@ async function main() {
   );
   console.log(`  passthrough ${formatMb(passthroughBytes)} MB`);
   console.log(`  manifest entries: ${Object.keys(map).length}`);
+  console.log(
+    `  tiers: P0 ${tierStats[TIER_P0].files} files / ${formatMb(tierStats[TIER_P0].bytes)} MB` +
+      ` | P1 ${tierStats[TIER_P1].files} files / ${formatMb(tierStats[TIER_P1].bytes)} MB` +
+      ` | P2 ${tierStats[TIER_P2].files} files / ${formatMb(tierStats[TIER_P2].bytes)} MB`,
+  );
+  console.log(`  cdn manifest: ${CDN_MANIFEST_NAME} contentHash=${contentHash}`);
   console.log(`  output: tex-ship/ (source tex/ untouched)`);
 }
 

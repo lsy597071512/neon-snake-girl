@@ -119,6 +119,28 @@ async function idbReplaceAll(entries: LifeEvent[]): Promise<void> {
   db.close();
 }
 
+/** 重置存档：清空生活档案（IDB + LS + 快照去重缓存） */
+export async function purgeLifeArchive(): Promise<void> {
+  lastSnapKey.clear();
+  try {
+    localStorage.removeItem(LS_FALLBACK);
+  } catch {
+    /* ignore */
+  }
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    /* IDB 不可用：LS 已清即可 */
+  }
+}
+
 export async function appendLifeEvent(
   partial: Omit<LifeEvent, 'id'> & { id?: string },
 ): Promise<void> {

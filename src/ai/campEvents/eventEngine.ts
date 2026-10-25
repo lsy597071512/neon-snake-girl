@@ -373,6 +373,26 @@ function resolveEvent(
       }
       break;
     }
+    case 'dance_party':
+    case 'dance_party_2f': {
+      const joiners = ev.participants.filter((p) => p.inCoScreen || p.arrived);
+      for (const p of joiners) adjustAffinity(living, p.characterId, 3);
+      if (joiners.length >= 2) {
+        bumpPairwiseRelations(
+          living,
+          joiners.map((p) => p.characterId),
+          3,
+        );
+        bits.push(
+          `${joiners.map((p) => nameOf(p.characterId)).join('、')}一起跳了舞，彼此熟络起来。`,
+        );
+      } else {
+        bits.push(
+          `${joiners.map((p) => nameOf(p.characterId)).join('、') || '几乎没人'}在大厅舞会上跳了一段。`,
+        );
+      }
+      break;
+    }
     case 'pool_party': {
       const joiners = ev.participants.filter((p) => p.inCoScreen || p.arrived);
       for (const p of joiners) adjustAffinity(living, p.characterId, 3);
@@ -382,8 +402,7 @@ function resolveEvent(
           joiners.map((p) => p.characterId),
           3,
         );
-      }
-      const suited = (ev.meta?.swimsuitIds ?? '')
+      }      const suited = (ev.meta?.swimsuitIds ?? '')
         .split(',')
         .filter(Boolean)
         .map(nameOf);

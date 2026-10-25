@@ -11,6 +11,7 @@ import {
   formatArchiveAge,
   listDialogueArchive,
   makeLocalDigest,
+  purgeDialogueArchive,
   searchDialogueArchive,
   type ArchiveLine,
   type DialogueArchiveEntry,
@@ -18,7 +19,9 @@ import {
 import {
   backfillTimelineFromMemories,
   maybePromoteMemoryToTimeline,
+  purgeLifeTimeline,
 } from './lifeTimeline';
+import { purgeLifeArchive } from './lifeArchive';
 import { CHARACTER_MAP } from '../data/characters';
 
 /** 发给模型的最近原句轮数 */
@@ -53,6 +56,25 @@ function trimMemoriesBucketed(list: AiMemoryEntry[]): AiMemoryEntry[] {
 }
 
 /**
+ * 删档重置：清空存档之外的永久记忆（对话档案 / 生活档案 / 人生时间线）。
+ * 这些存在 IndexedDB 里，不跟存档走；不清就会在「删档重开」后把旧聊天记录
+ * 通过 hydrateCharacterMemoryFromArchive 灌回 recentChats。
+ */
+let purgeChain: Promise<void> = Promise.resolve();
+
+/** 读档案前 await，避免清档与灌档竞态 */
+export function waitMemoryPurge(): Promise<void> {
+  return purgeChain;
+}
+
+export function resetAiMemories(): Promise<void> {
+  purgeChain = purgeChain.then(async () => {
+    await Promise.allSettled([purgeDialogueArchive(), purgeLifeArchive(), purgeLifeTimeline()]);
+  });
+  return purgeChain;
+}
+
+/**
  * 从永久档案灌回工作记忆（0 token）。
  * 关游戏再开后，IndexedDB 全文仍在 → 重建 digests / 近窗 / memories。
  */
@@ -60,6 +82,7 @@ export async function hydrateCharacterMemoryFromArchive(
   living: AiLivingSave,
   characterId: string,
 ): Promise<void> {
+  await waitMemoryPurge();
   if (!living.chatDigests) living.chatDigests = {};
   if (!living.recentChats) living.recentChats = {};
   if (!living.memories) living.memories = {};

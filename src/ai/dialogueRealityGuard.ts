@@ -21,11 +21,19 @@ import type {
   LlmDialogueResult,
 } from './types';
 import { detectAdultEventContext } from './adultEvents';
+import { getCampDisplaySkinId } from './campOutfit';
+import {
+  BATH_CO_SKIN_ID,
+  BATH_HELP_SKIN_ID,
+  isAloneBathSkinId,
+  LIFEWEAR_SKIN_ID,
+} from '../data/characterSkins';
 
 export type DialogueRealityIssue =
   | 'exact_repeat'
   | 'stale_scene_speech'
   | 'ignore_location_challenge'
+  | 'stale_skin_speech'
   | 'ignore_player_ask';
 
 /** 非浴室却当「正在洗」说的现在时话术（规划句除外）——并入通用 stale 的强信号 */
@@ -85,6 +93,57 @@ export function playerChallengesLocation(playerMessage: string): boolean {
   return PLAYER_LOC_CHALLENGE_RE.test(playerMessage || '');
 }
 
+const LIFEWEAR_CLAIM_RE = /(?:我|身上|现在|此刻).{0,10}(?:穿着|穿的是|穿了|是).{0,12}(?:生活服装|营地装|营地日常|日常服|休闲服)/;
+const ARMOR_CLAIM_RE = /(?:我|身上|现在|此刻).{0,10}(?:穿着|穿的是|穿了|是).{0,12}(?:战斗装甲|默认装甲|装甲|原皮)/;
+/**
+ * 自称"此刻正穿着浴巾/泡澡服/蒸汽毛巾"——用于画面是便装时的反向矛盾检测。
+ * 只认"现在/此刻/身上"这类当下表述，避免把"等我去换浴巾"这类规划句误判。
+ */
+const BATH_WEAR_CLAIM_RE =
+  /(?:我|身上|现在|此刻).{0,10}(?:穿着|裹着|披着|套着|只穿着|只裹着|是).{0,12}(?:浴巾|泡澡服|蒸汽毛巾|浴袍)|(?:我|身上).{0,6}(?:只裹着一条浴巾|身上只有浴巾|只有一条浴巾)/;
+/**
+ * 自称"此刻正在泡澡/冲澡/洗澡"——画面是便装时属于"说着在洗、穿着便装"的矛盾。
+ * 允许"在浇水泡澡"这类中间带动词的说法；规划句（等会去洗 / 待会冲澡）由 DIALOGUE_PLANNING_RE 排除。
+ */
+const BATHING_NOW_CLAIM_RE =
+  /(?:正在|正|已经|还)[^。！？]{0,3}(?:泡澡|冲澡|淋浴|洗澡)|在[^。！？]{0,3}(?:泡澡|冲澡|淋浴|洗澡)(?:中|呢|了|着|，|,|。|$)|(?:泡在|躺在)(?:浴缸|热水|水里)|正在冲洗/;
+
+/** 画面是不是"浴巾/泡澡态"（pifu09 独自泡澡 / pifu03 蒸汽毛巾 / pifu07 帮洗 / pifu08 共浴） */
+function isBathWearSkinId(skinId: string | null | undefined): boolean {
+  if (!skinId) return false;
+  return (
+    isAloneBathSkinId(skinId) ||
+    skinId === BATH_HELP_SKIN_ID ||
+    skinId === BATH_CO_SKIN_ID
+  );
+}
+
+export function speechClaimsWrongSkin(
+  speech: string,
+  living: AiLivingSave,
+  characterId: string,
+  opts?: { inBathRoom?: boolean },
+): boolean {
+  const active = getCampDisplaySkinId(living, characterId);
+  const claimsBathNow =
+    BATHING_NOW_CLAIM_RE.test(speech) && !DIALOGUE_PLANNING_RE.test(speech);
+  // 画面=默认装甲：不能自称生活服装，也不能自称正裹着浴巾
+  if (!active) return LIFEWEAR_CLAIM_RE.test(speech) || BATH_WEAR_CLAIM_RE.test(speech);
+  // 画面=生活服装（便装）：不能自称装甲，也不能自称此刻正穿着浴巾
+  if (active === LIFEWEAR_SKIN_ID) {
+    // "正在泡澡"与"画面是便装"矛盾——无论她是否站在浴室：
+    //  - 不在浴室：她压根不该在洗 → 场景错乱
+    //  - 在浴室：要么立绘没切到浴巾（系统 bug），要么她在说"我正要换浴巾"（应改口）
+    const bathClash = claimsBathNow && !BATH_WEAR_CLAIM_RE.test(speech);
+    return ARMOR_CLAIM_RE.test(speech) || BATH_WEAR_CLAIM_RE.test(speech) || bathClash;
+  }
+  // 画面=浴巾/泡澡态：不能自称生活服装或装甲（裹着浴巾却说自己穿便装）
+  if (isBathWearSkinId(active)) {
+    return LIFEWEAR_CLAIM_RE.test(speech) || ARMOR_CLAIM_RE.test(speech);
+  }
+  return false;
+}
+
 export function speechClaimsBathPresent(speech: string): boolean {
   const t = speech || '';
   if (!STALE_BATH_PRESENT_RE.test(t)) return false;
@@ -122,11 +181,11 @@ function dialogueTouchesPlayerAsk(
 ): boolean {
   const speech = `${dialogue || ''}${extraSpeech || ''}`;
   const ask = playerMessage || '';
-  // 主题锚：问「敏感点」时，答腰/胸/腿等也算接住（不必复读「敏感」二字）
-  if (/敏感/.test(ask) && /敏感|腰|胸|乳|腿|臀|耳|尾|胯|会阴|管道|机油|碰|摸|触/.test(speech)) {
+  // 主题锚：问「亲近区」时，答腰/胸/腿等也算接住
+  if (/敏感|亲近/.test(ask) && /敏感|亲近|腰|胸|腿|耳|尾|碰|摸|触/.test(speech)) {
     return true;
   }
-  if (/材质|布料|面料|什么做的/.test(ask) && /材质|布|皮|丝|甲|纤维|合成|织物|乳胶|皮革/.test(speech)) {
+  if (/材质|布料|面料|什么做的/.test(ask) && /材质|布|皮|丝|甲|纤维|合成|织物|胶质|皮革/.test(speech)) {
     return true;
   }
 
@@ -191,6 +250,16 @@ export function detectDialogueRealityIssues(
 
   // 通用：对白声称的「此刻房间」与系统快照不一致（浴室只是其中一类）
   if (
+    speechClaimsWrongSkin(speech, living, req.characterId, {
+      inBathRoom:
+        scene.roomId === 'room_1f_bath' ||
+        scene.roomId === 'room_2f_wc' ||
+        scene.activity === 'bathe',
+    })
+  ) {
+    issues.push('stale_skin_speech');
+  }
+  if (
     speechClaimsWrongPresentScene(speech, req.characterId, scene.roomId) ||
     (speechClaimsBathPresent(speech) &&
       scene.roomId !== 'room_1f_bath' &&
@@ -235,6 +304,7 @@ export function buildDialogueRealityRetryHint(
   req: DialogueRequest,
   issues: DialogueRealityIssue[],
   bannedDialogue?: string,
+  lastDialogue?: string,
 ): string {
   const snap = captureDialogueSceneSnapshot(living, req.characterId);
   const place = snap.presenceLabel || roomLabel(snap.roomId);
@@ -250,6 +320,22 @@ export function buildDialogueRealityRetryHint(
     bits.push(
       `禁止假装人在别的房间做事。对白的「正在…」必须属于「${place}」；冲澡/洗澡/武器库点检等其它现场一律禁止（规划意图只写 desire_next）。`,
     );
+  }
+  if (issues.includes('stale_skin_speech')) {
+    const activeSkin = getCampDisplaySkinId(living, req.characterId);
+    bits.push(
+      activeSkin
+        ? `衣装说错：当前画面是「${snap.skinName}」，只能按当前画面回答，禁止把它说成生活服装、装甲或其它未显示皮肤。`
+        : '衣装说错：当前画面是默认战斗装甲原皮，禁止把它说成生活服装、营地装或日常服。',
+    );
+    if (
+      activeSkin === 'pifu00' &&
+      /浴巾|泡澡|冲澡|淋浴|洗澡/.test(lastDialogue ?? '')
+    ) {
+      bits.push(
+        '画面此刻是生活服装（便装）：禁止说"正在泡澡/冲澡/裹着浴巾"。若人在浴室，说"我正要换洗浴外覆/去拿浴巾"；若不在浴室，说你在做的事。',
+      );
+    }
   }
   if (issues.includes('ignore_location_challenge')) {
     bits.push(
@@ -284,6 +370,11 @@ export function applyDialogueRealityHardClamp(
 
   let desire_next = result.desire_next;
   let bath_intimate_consent = result.bath_intimate_consent;
+  let bath_assist_action = result.bath_assist_action;
+  let dance_action = result.dance_action;
+  let anfu_action = result.anfu_action;
+  let anfu_gain = result.anfu_gain;
+  let anfu_bonus = result.anfu_bonus;
   let world_intent = result.world_intent;
   let stim_target = result.stim_target;
   let stim_zones = result.stim_zones;
@@ -294,6 +385,50 @@ export function applyDialogueRealityHardClamp(
 
   if (!inBath) {
     bath_intimate_consent = '';
+  }
+
+  // 帮洗进行中：禁止脱巾门控抢戏；共浴允许交互02脱巾
+  if (
+    living.bathAssistSession?.active &&
+    living.bathAssistSession.characterId === req.characterId &&
+    living.bathAssistSession.mode === 'help_wash'
+  ) {
+    bath_intimate_consent = false;
+  }
+
+  // 安抚室门控：非安抚会话剥离安抚字段；安抚中钳制 gain/bonus 越界
+  {
+    const anfuId = 'room_b1_discipline';
+    const inAnfuRoom = snap.roomId === anfuId;
+    const anfuOn =
+      living.anfuSession?.active === true &&
+      living.anfuSession.characterId === req.characterId;
+    if (!inAnfuRoom || !anfuOn) {
+      anfu_action = undefined;
+      anfu_gain = undefined;
+      anfu_bonus = undefined;
+    } else {
+      if (typeof anfu_gain === 'number') {
+        anfu_gain = Math.max(10, Math.min(40, Math.floor(anfu_gain)));
+      }
+      if (typeof anfu_bonus === 'number') {
+        anfu_bonus = Math.max(0, Math.min(3, Math.floor(anfu_bonus)));
+      }
+      // 换装相：gain/action 一律剥离（还没换好不能攻击）
+      if (living.anfuSession?.phase === 'dressing') {
+        anfu_gain = undefined;
+        anfu_action = undefined;
+      }
+      // 待机相未首击：gain 无意义，剥离
+      if (living.anfuSession?.phase === 'standby') {
+        anfu_gain = undefined;
+      }
+      // 疲惫相：gain 冻结，只留 end
+      if (living.anfuSession?.phase === 'exhausted') {
+        anfu_gain = undefined;
+        if (anfu_action && anfu_action !== 'end') anfu_action = undefined;
+      }
+    }
   }
 
   const adultCtx = detectAdultEventContext({
@@ -334,6 +469,11 @@ export function applyDialogueRealityHardClamp(
     ...result,
     desire_next,
     bath_intimate_consent,
+    bath_assist_action,
+    dance_action,
+    anfu_action,
+    anfu_gain,
+    anfu_bonus,
     stim_target,
     stim_zones,
     stim_intensity,

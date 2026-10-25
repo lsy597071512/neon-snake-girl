@@ -118,6 +118,12 @@ async function ensureSchema(env) {
        PRIMARY KEY (code, device_id)
      )`,
   ).run();
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS release_config (
+       key TEXT PRIMARY KEY,
+       value TEXT DEFAULT ''
+     )`,
+  ).run();
 }
 
 async function requireAdmin(request, env) {
@@ -298,13 +304,131 @@ async function handleSelfUnbind(request, env) {
   return json({ ok: true, message: '旧设备已全部解绑，请重新登录' });
 }
 
+/* ── P3 版本门 + 资源云分发 ── */
+
+const DEFAULT_RELEASE = { latestBuild: 0, minBuild: 0, apkUrl: '', notes: '', assetHash: '' };
+
+/** GET /api/version：客户端启动版本门（强更判定 + 资源弱更 hash 探测）。边缘缓存 60s 挡高并发 */
+async function handleVersion(env) {
+  let info = DEFAULT_RELEASE;
+  try {
+    const row = await env.DB.prepare('SELECT value FROM release_config WHERE key = ?').bind('current').first();
+    if (row?.value) info = { ...DEFAULT_RELEASE, ...JSON.parse(row.value) };
+  } catch {
+    /* 配置缺失时返回默认（客户端不拦人） */
+  }
+  return new Response(JSON.stringify(info), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'public, max-age=60',
+      ...CORS,
+    },
+  });
+}
+
+const ASSET_MIME = {
+  webp: 'image/webp',
+  webm: 'video/webm',
+  mp4: 'video/mp4',
+  json: 'application/json; charset=utf-8',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  mp3: 'audio/mpeg',
+  ogg: 'audio/ogg',
+  vtt: 'text/vtt; charset=utf-8',
+};
+
+/** GET/HEAD /assets/*：代理 Backblaze B2 私有桶（免信用卡方案），Worker 持凭证鉴权回源；Range 透传（断点续传）；非 Range GET 走边缘缓存 */
+const B2_BUCKET = 'rust-belt-assets';
+let b2AuthCache = null; // { downloadUrl, token, exp }，按 isolate 内存缓存
+
+async function b2Authorize(env) {
+  if (b2AuthCache && Date.now() < b2AuthCache.exp) return b2AuthCache;
+  const basic = btoa(`${env.B2_KEY_ID}:${env.B2_APP_KEY}`);
+  const r = await fetch('https://api.backblazeb2.com/b2api/v3/b2_authorize_account', {
+    headers: { Authorization: `Basic ${basic}` },
+  });
+  if (!r.ok) throw new Error(`b2_authorize_account ${r.status}`);
+  const d = await r.json();
+  b2AuthCache = {
+    downloadUrl: d.apiInfo.storageApi.downloadUrl,
+    token: d.authorizationToken,
+    exp: Date.now() + 20 * 3600 * 1000, // token 24h 有效，提前续
+  };
+  return b2AuthCache;
+}
+
+async function b2FetchAsset(env, key, rangeHdr, method) {
+  const a = await b2Authorize(env);
+  const headers = { Authorization: a.token };
+  if (rangeHdr) headers.Range = rangeHdr;
+  return fetch(
+    `${a.downloadUrl}/file/${B2_BUCKET}/` + key.split('/').map(encodeURIComponent).join('/'),
+    { method, headers },
+  );
+}
+
+async function handleAsset(request, env, ctx) {
+  if (!env.B2_KEY_ID || !env.B2_APP_KEY) return json({ error: 'B2_NOT_CONFIGURED' }, 500);
+  const key = decodeURIComponent(new URL(request.url).pathname.replace(/^\/assets\//, ''));
+  if (!key || key.includes('..')) return json({ error: 'BAD_KEY' }, 400);
+
+  const isGet = request.method === 'GET';
+  const hasRange = request.headers.has('range');
+  // 分层清单是弱更探测的入口：不缓存，保证「上传 + 改 assetHash」后客户端立刻拉到新版
+  const isManifest = key === 'tex/ship-manifest-cdn.json';
+  if (isGet && !hasRange && !isManifest) {
+    const hit = await caches.default.match(request.url);
+    if (hit) return hit;
+  }
+
+  const rangeHdr = hasRange ? request.headers.get('range') : null;
+  let upstream = await b2FetchAsset(env, key, rangeHdr, request.method);
+  if (upstream.status === 401) {
+    b2AuthCache = null; // token 提前失效则重登一次
+    upstream = await b2FetchAsset(env, key, rangeHdr, request.method);
+  }
+  if (!upstream.ok && upstream.status !== 206) {
+    return new Response(`Upstream ${upstream.status}`, { status: upstream.status === 404 ? 404 : 502, headers: CORS });
+  }
+
+  const headers = new Headers();
+  for (const h of ['content-length', 'content-range', 'etag', 'last-modified']) {
+    const v = upstream.headers.get(h);
+    if (v) headers.set(h, v);
+  }
+  headers.set('Accept-Ranges', 'bytes');
+  // 资源 TTL 1h：同名覆盖（弱更替换美术）时边缘最多滞后 1 小时；workers.dev 不支持 API 清缓存，不能用 immutable 长缓存
+  // 清单例外：不缓存（弱更探测入口，见上）
+  headers.set('Cache-Control', isManifest ? 'no-cache' : 'public, max-age=3600');
+  for (const [k, v] of Object.entries(CORS)) headers.set(k, v);
+  const ext = key.split('.').pop().toLowerCase();
+  if (ASSET_MIME[ext]) headers.set('Content-Type', ASSET_MIME[ext]);
+
+  const resp = new Response(request.method === 'HEAD' ? null : upstream.body, {
+    status: upstream.status,
+    headers,
+  });
+  if (isGet && !hasRange && !isManifest && upstream.status === 200) {
+    ctx.waitUntil(caches.default.put(request.url, resp.clone()));
+  }
+  return resp;
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === 'OPTIONS') return cors(new Response(null, { status: 204 }));
     const url = new URL(request.url);
     const path = url.pathname;
 
     try {
+      // 资源分发不依赖 D1 配置，先于网关配置检查（R2 未绑定时返回 500 明确错误）
+      if ((request.method === 'GET' || request.method === 'HEAD') && path.startsWith('/assets/')) {
+        return await handleAsset(request, env, ctx);
+      }
+
       if (!env.DB || !env.LICENSE_SECRET || !env.ADMIN_KEY) {
         return json({ error: 'GATEWAY_NOT_CONFIGURED' }, 500);
       }
@@ -312,6 +436,9 @@ export default {
 
       if (request.method === 'GET' && path === '/api/ping') {
         return json({ ok: true, service: 'rust-belt-license', time: Date.now() });
+      }
+      if (request.method === 'GET' && path === '/api/version') {
+        return await handleVersion(env);
       }
       if (request.method === 'POST' && path === '/api/login') {
         return cors(await handleLogin(request, env));
@@ -376,6 +503,38 @@ export default {
           await env.DB.prepare('DELETE FROM devices WHERE code = ?').bind(code).run();
         }
         return json({ ok: true, code });
+      }
+
+      // 发布配置（版本门）：{ latestBuild, minBuild, apkUrl, notes, assetHash }
+      //  - 本地 build < minBuild → 客户端强更拦截（弹迭代告示，只能去下载新包）
+      //  - assetHash ≠ 包内清单 contentHash → 客户端静默弱更资源（边玩边下，sha256 校验后替换）
+      if (request.method === 'POST' && path === '/api/admin/release') {
+        const body = await request.json().catch(() => ({}));
+        const info = {
+          latestBuild: Math.max(0, Number(body?.latestBuild) || 0),
+          minBuild: Math.max(0, Number(body?.minBuild) || 0),
+          apkUrl: String(body?.apkUrl ?? '').slice(0, 300),
+          notes: String(body?.notes ?? '').slice(0, 2000),
+          assetHash: String(body?.assetHash ?? '').slice(0, 64),
+        };
+        await env.DB.prepare(
+          `INSERT INTO release_config (key, value) VALUES ('current', ?1)
+           ON CONFLICT(key) DO UPDATE SET value = ?1`,
+        )
+          .bind(JSON.stringify(info))
+          .run();
+        return json({ ok: true, release: info });
+      }
+
+      if (request.method === 'GET' && path === '/api/admin/release') {
+        const row = await env.DB.prepare('SELECT value FROM release_config WHERE key = ?').bind('current').first();
+        let info = DEFAULT_RELEASE;
+        try {
+          if (row?.value) info = { ...DEFAULT_RELEASE, ...JSON.parse(row.value) };
+        } catch {
+          /* ignore */
+        }
+        return json({ release: info });
       }
 
       return json({ error: 'NOT_FOUND' }, 404);

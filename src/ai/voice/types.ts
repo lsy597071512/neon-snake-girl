@@ -25,6 +25,8 @@ export type CharacterVoiceProfile = {
   characterId: string;
   /** Qwen TTS voice：系统音色短名，或 qwen-tts-vc-* 复刻音色 ID */
   voice: string;
+  /** 旧通道（qwen3-tts-flash）可用的音色：Qwen-Audio 不可用时兜底 */
+  legacyVoice?: string;
   /** 调试展示用中文名 */
   voiceLabel: string;
   /** 中性态基线韵律（再叠 emotion） */
@@ -38,6 +40,8 @@ export type CharacterVoiceProfile = {
   pitchFloor?: number;
   /** free-style 指令：压年轻女声 + 人设 */
   instruction: string;
+  /** 复刻音色不可用时的系统音色兜底（不设则用 Cherry） */
+  fallbackVoice?: string;
   /** 选音理由（调试） */
   reason: string;
 };

@@ -1,8 +1,11 @@
 # 新 Agent 快速上手指南
 
+> **第一步先读 [ai-first-principle.md](./ai-first-principle.md)：第一宗旨 = 让角色真实地生活在游戏的世界里。**
+> 玩家离线＝指挥官离开/睡觉，世界继续走；角色可拒绝、有作息、有代价、无死锁。任何 AI 改动先过它的自检清单。
+
 > **目标**：让下一个接手本项目的 AI Agent 能在 30 分钟内开始有效工作。  
 > **前置要求**：有代码编辑能力，能读写 TypeScript，了解基本的游戏开发概念。  
-> **最新更新**：2026-09-06
+> **最新更新**：2026-10-21（首段固定为第一宗旨）
 
 ---
 
@@ -10,9 +13,10 @@
 
 ### 必读文档（按顺序）
 
-1. **[README-dev.md](./README-dev.md)** — 项目全貌，10 分钟
-2. **[ai-memory-layers.md](./ai-memory-layers.md)** — AI 记忆如何工作
-3. **[激活与账号系统.md](./激活与账号系统.md)** — 账号/激活/爱发电接入
+1. **[ai-first-principle.md](./ai-first-principle.md)** — 第一宗旨 / 活人定律（最高优先级）
+2. **[README-dev.md](./README-dev.md)** — 项目全貌，10 分钟
+3. **[ai-memory-layers.md](./ai-memory-layers.md)** — AI 记忆如何工作
+4. **[激活与账号系统.md](./激活与账号系统.md)** — 账号/激活/爱发电接入
 
 ### 理解项目结构
 
@@ -170,6 +174,9 @@ grep -r "SLEEP_REAL_DURATION_MS" src/
 
 ### 5. 打包失败
 
+> **⚠️ 打包前必读：`docs/apk-release-build.md`**（签名规范 / 四步可靠链路 / 安全软件扫描卡死的绕行方案）。
+> 若 `vite build` 或 `cap sync` 无报错地卡死、进程 CPU 冻结，**不是代码问题**，直接跳到该文档第 3、4 节，不要重试。
+
 1. 运行 `npm run assets:build-ship` 先构建资源
 2. 检查 `tex-ship/` 是否生成
 3. 查看 `verify-ship-gate` 错误信息
@@ -183,9 +190,11 @@ grep -r "SLEEP_REAL_DURATION_MS" src/
 ```bash
 npm run dev          # 开发服务器
 npm run build        # 构建 Web
-npm run build:apk    # 构建 Android
+npm run build:apk    # 构建 Android（debug，仅供测试）
 npm run assets:build-ship  # 打包资源
 ```
+
+> **发版打包（签名 release）** 见 [`apk-release-build.md`](./apk-release-build.md)。不要把 debug 包发给玩家（签名不同，覆盖安装会失败并导致存档丢失）。
 
 ### 调试端点
 

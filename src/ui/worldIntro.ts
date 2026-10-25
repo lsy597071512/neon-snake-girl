@@ -41,13 +41,15 @@ export function playWorldIntro(): Promise<void> {
     overlay.innerHTML = `
       <div class="world-intro-stage">
         <video
-          class="world-intro-video"
+          class="world-intro-video is-awaiting-play"
           src="${texUrl(WORLD_INTRO_VIDEO_SRC)}"
           autoplay
           muted
           playsinline
           webkit-playsinline
           preload="auto"
+          controlslist="nodownload nofullscreen noremoteplayback"
+          disablepictureinpicture
           aria-hidden="true"
         ></video>
         <img
@@ -82,6 +84,12 @@ export function playWorldIntro(): Promise<void> {
     const enterBtn = overlay.querySelector('[data-world-intro-enter]') as HTMLButtonElement;
     const fullText = WORLD_INTRO_TEXT;
 
+    // 原生播放键根治：首帧播出前整只隐藏（此时无画面，大播放键也不可见）
+    const armVideoFrame = () => videoEl.classList.add('is-awaiting-play');
+    videoEl.addEventListener('playing', () => videoEl.classList.remove('is-awaiting-play'));
+    videoEl.addEventListener('error', () => videoEl.classList.remove('is-awaiting-play'));
+    videoEl.addEventListener('emptied', armVideoFrame);
+
     let closed = false;
     let charIndex = 0;
     let typeTimer = 0;
@@ -114,6 +122,7 @@ export function playWorldIntro(): Promise<void> {
       void setBgmTrack(null, { fadeMs: 280 });
       videoEl.muted = false;
       videoEl.loop = false;
+      armVideoFrame();
       try {
         await videoEl.play();
       } catch {
@@ -123,7 +132,9 @@ export function playWorldIntro(): Promise<void> {
         try {
           await videoEl.play();
         } catch {
-          /* ignore */
+          // 连静音都播不了：不回退到「露出视频」——那会重新带出原生大播放键。
+          // 改为显示静态插画兜底，并保留 intro BGM。
+          artEl.classList.add('is-active');
         }
       }
     };

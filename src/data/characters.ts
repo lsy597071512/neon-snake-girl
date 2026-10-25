@@ -3,6 +3,8 @@ import type { CharacterDef } from '../types';
 export const CHARACTERS: CharacterDef[] = [
   {
     id: 'ashcrow',
+    skillName: '破风突贯',
+    skillDesc: '巨型风刃横扫本道：8倍子弹伤害，存活者击退',
     name: '苍羽·澪',
     rarity: 'SR',
     basePower: 120,
@@ -22,6 +24,8 @@ export const CHARACTERS: CharacterDef[] = [
   },
   {
     id: 'heartforge',
+    skillName: '楯影庇护',
+    skillDesc: '6秒全队受伤减半，全队义体+15',
     name: '白楯·芹奈',
     rarity: 'SR',
     basePower: 115,
@@ -41,6 +45,8 @@ export const CHARACTERS: CharacterDef[] = [
   },
   {
     id: 'mirror',
+    skillName: '弹道织网',
+    skillDesc: '5秒全队子弹伤害+35%，命中击退（弹伤=每发子弹伤害）',
     name: '银绯·玲',
     rarity: 'SR',
     basePower: 118,
@@ -60,6 +66,8 @@ export const CHARACTERS: CharacterDef[] = [
   },
   {
     id: 'neoncoil',
+    skillName: '无痕三连斩',
+    skillDesc: '三连斩锁定血最高者：每段6倍子弹伤害',
     name: '苍斩·凛',
     rarity: 'SR',
     basePower: 122,
@@ -79,6 +87,8 @@ export const CHARACTERS: CharacterDef[] = [
   },
   {
     id: 'prismrift',
+    skillName: '熔城一炮',
+    skillDesc: '0.6秒后炮击最密集处：范围20倍子弹伤害+灼烧',
     name: '焰甲·朱里',
     rarity: 'SR',
     basePower: 116,
@@ -98,6 +108,8 @@ export const CHARACTERS: CharacterDef[] = [
   },
   {
     id: 'wireguard',
+    skillName: '荧惑干扰',
+    skillDesc: '全场敌人定身3秒（无伤害，控场）',
     name: '黄狐·萤',
     rarity: 'SR',
     basePower: 119,

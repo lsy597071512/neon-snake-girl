@@ -210,11 +210,15 @@ export class VfxPool {
     return tpl;
   }
 
+  /** 给技能特效预留的池位：普通命中火花不得占用最后 12 格，保证技能落点不被子弹火花瞬间顶掉 */
+  private static readonly SKILL_RESERVE = 12;
+
   private acquire(tpl: MaterialTemplate, critical = false): THREE.Sprite | null {
-    if (this.active.length >= this.profile.maxVfxParticles) {
+    if (this.active.length >= this.profile.maxVfxParticles - (critical ? 0 : VfxPool.SKILL_RESERVE)) {
       if (!critical) return null;
-      const oldest = this.active.shift();
-      if (oldest) this.release(oldest.sprite);
+      // 满池时顶掉最新（基本是子弹火花），而不是最早（往往是技能主体），技能落点才站得住
+      const newest = this.active.pop();
+      if (newest) this.release(newest.sprite);
     }
     const sprite = this.pool.find((s) => !s.visible) ?? null;
     if (!sprite) return null;
@@ -293,7 +297,7 @@ export class VfxPool {
    * P2：纵向环波（贴地扩散圆环）。从中心 0→1 扩张，从 1→0 衰减。
    * 是命中/技能的"震荡"主源，给打击命中加上"震源"质感。
    */
-  spawnShockRing(x: number, y: number, z: number, color: string, radius = 2.4, life = 0.32): void {
+  spawnShockRing(x: number, y: number, z: number, color: string, radius = 2.4, life = 0.32, alpha = 0.7): void {
     const tpl = this.getTemplate(`ring:${color}`, color, 'ring');
     const sprite = this.acquire(tpl, true);
     if (!sprite) return;
@@ -310,7 +314,7 @@ export class VfxPool {
       scaleDecay: -radius / life,
       sx0: 0.05,
       sy0: 0.05 * (1 / 6), // ring 贴图宽高比 6:1（在 2D 是横长的椭圆，sprite 圆环时 scale 必须等比）
-      alphaMul: 0.7,
+      alphaMul: alpha,
       ease: 'easeOut',
     });
   }
@@ -433,24 +437,24 @@ export class VfxPool {
    * P2+：竖向闪电链（从空中劈下）。专给高能技能专用。
    * alphaMul 1 → 0.5；闪电贴图已去掉内核白线（见 textureUtils）。
    */
-  spawnLightningBolt(x: number, y: number, z: number, color: string, length = 8): void {
+  spawnLightningBolt(x: number, y: number, z: number, color: string, length = 8, width = 1.0): void {
     const tpl = this.getTemplate(`lightning:${color}`, color, 'lightning');
     const sprite = this.acquire(tpl, true);
     if (!sprite) return;
     sprite.position.set(x, y + length / 2, z);
-    sprite.scale.set(1.0, length, 1);
+    sprite.scale.set(width, length, 1);
     this.active.push({
       sprite,
       life: 0,
-      maxLife: 0.16,
+      maxLife: 0.22,
       vx: 0,
       vy: 0,
       vz: 0,
       gy: 0,
       scaleDecay: 0,
-      sx0: 1.0,
+      sx0: width,
       sy0: length,
-      alphaMul: 0.5,
+      alphaMul: 0.6,
       ease: 'easeOut',
     });
   }
@@ -486,7 +490,7 @@ export class VfxPool {
    * P2+：上升光柱（发亮的竖向带，给技能收尾留"余韵"）。
    * alphaMul 0.85 → 0.4；easeOut 防止停留满屏。
    */
-  spawnLightPillar(x: number, y: number, z: number, color: string, height = 4, life = 0.4): void {
+  spawnLightPillar(x: number, y: number, z: number, color: string, height = 4, life = 0.4, alpha = 0.4): void {
     const tpl = this.getTemplate(`pillar:${color}`, color, 'glow', 0.7);
     const sprite = this.acquire(tpl);
     if (!sprite) return;
@@ -503,7 +507,7 @@ export class VfxPool {
       scaleDecay: 0,
       sx0: 0.6,
       sy0: height,
-      alphaMul: 0.4,
+      alphaMul: alpha,
       ease: 'easeOut',
     });
   }
@@ -680,8 +684,18 @@ export class VfxPool {
     z: number,
     target?: { x: number; y: number; z: number },
   ): void {
-    void skillId; void camera; void x; void y; void z; void target;
-    return;
+    // UR 光轮裁决使用“加粗闪电 + 双层扩散环 + 光晕 + 光柱”的重型天罚反馈。
+    if (skillId !== 'stellar_judgment') return;
+    const p = target ?? { x, y, z };
+    const groundY = Math.max(0.02, p.y - 1.2);
+    this.spawnLightningBolt(p.x, p.y + 3.4, p.z, '#ffd54f', 13.6, 4.8);
+    this.spawnLightningBolt(p.x + 0.9, p.y + 2.6, p.z - 0.4, '#fff0a8', 10.4, 2.4);
+    this.spawnShockRing(p.x, groundY, p.z, '#ffd54f', 6.8, 0.45, 1);
+    this.spawnShockRing(p.x, groundY + 0.2, p.z, '#ff8a3d', 4.4, 0.6, 1);
+    this.spawnHalo(p.x, p.y + 0.6, p.z, '#ffd54f', 10.4, 0.85, 0.84);
+    this.spawnLightPillar(p.x, groundY, p.z, '#ffd54f', 12, 0.5, 0.8);
+    this.spawnImpactSparks(p.x, p.y, p.z, '#ffb347', 8);
+    void camera;
   }
 
   // 兼容旧 spell 方法签名：保留别名以避免调用方破裂（虽然没有调用方了）
@@ -699,11 +713,11 @@ export class VfxPool {
 
   spawnPierceTrail(x: number, y: number, z: number): void {
     const tpl = this.getTemplate('pierce', '#ff5e8a', 'glow', 0.65);
-    const sprite = this.acquire(tpl);
+    const sprite = this.acquire(tpl, true);
     if (!sprite) return;
     sprite.position.set(x, y, z);
-    sprite.scale.set(1.1, 0.35, 1);
-    this.active.push({ sprite, life: 0, maxLife: 0.22, vx: 0, vy: 0, vz: -4, gy: 0, scaleDecay: 3, sx0: 1.1, sy0: 0.35, alphaMul: 0.55, ease: 'easeOut' });
+    sprite.scale.set(2.6, 0.8, 1);
+    this.active.push({ sprite, life: 0, maxLife: 0.5, vx: 0, vy: 0, vz: -4, gy: 0, scaleDecay: 3, sx0: 2.6, sy0: 0.8, alphaMul: 0.8, ease: 'easeOut' });
   }
 
   spawnShieldPulse(x: number, y: number, z: number, color = '#b8e0ff'): void {
@@ -713,6 +727,18 @@ export class VfxPool {
     sprite.position.set(x, y + 0.4, z);
     sprite.scale.set(1.6, 1.6, 1);
     this.active.push({ sprite, life: 0, maxLife: 0.5, vx: 0, vy: 0.2, vz: 0, gy: 0, scaleDecay: 0.6, sx0: 1.6, sy0: 1.6, alphaMul: 0.55, ease: 'easeOut' });
+  }
+
+  /**
+   * 持续性径向光晕：恒定尺寸、慢淡出，用于技能落点/命中的"光晕"余韵（非一闪）。
+   */
+  spawnHalo(x: number, y: number, z: number, color = '#ffd54f', size = 4.5, life = 0.8, alpha = 0.42): void {
+    const tpl = this.getTemplate(`halo:${color}`, color, 'glow', 0.5);
+    const sprite = this.acquire(tpl);
+    if (!sprite) return;
+    sprite.position.set(x, y, z);
+    sprite.scale.set(size, size, 1);
+    this.active.push({ sprite, life: 0, maxLife: life, vx: 0, vy: 0.25, vz: 0, gy: 0, scaleDecay: 0, sx0: size, sy0: size, alphaMul: alpha, ease: 'easeOut' });
   }
 
   spawnAmbientDust(count: number): void {

@@ -39,4 +39,5 @@ export * from './llmStream';
 export * from './bodySensitivity';
 export * from './adultEvents';
 export * from './bathIntimateConsent';
+export * from './bathAssistSession';
 export * from './disciplineSession';

@@ -20,7 +20,12 @@ import {
   type ShowerCampPortraitPlan,
 } from './livePortrait';
 import { getAiLiving } from '../ai/livingService';
-import { setBathIntimateIntroDone } from '../ai/bathIntimateConsent';
+import {
+  getBathIntimateIntroDone,
+  setBathIntimateIntroDone,
+} from '../ai/bathIntimateConsent';
+import { getCharacterSkin } from '../data/characterSkins';
+import { getRuntimeActiveSkinId } from './characterSkinRuntime';
 import { saveManager } from '../core/SaveManager';
 import { texUrl } from '../utils/texUrl';
 
@@ -180,6 +185,52 @@ function readDialogueSecondaryList(stage: HTMLElement): string[] {
   }
 }
 
+function readDialogueSecondaryLoopList(stage: HTMLElement): (string | null)[] {
+  const raw = stage.dataset.secondaryLoopList;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(decodeURIComponent(raw)) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((x) => (typeof x === 'string' && x ? x : null));
+  } catch {
+    return [];
+  }
+}
+
+function writeDialogueSecondaryLoopList(
+  stage: HTMLElement,
+  loops: (string | null | undefined)[] | undefined,
+): void {
+  if (!loops?.length) {
+    delete stage.dataset.secondaryLoopList;
+    return;
+  }
+  stage.dataset.secondaryLoopList = encodeURIComponent(
+    JSON.stringify(loops.map((x) => (typeof x === 'string' && x ? x : null))),
+  );
+}
+
+function syncDialogueSecondaryLoopsFromSkin(stage: HTMLElement, characterId: string): void {
+  const skinId = getRuntimeActiveSkinId(characterId, 'camp');
+  const skin = skinId ? getCharacterSkin(characterId, skinId) : null;
+  writeDialogueSecondaryLoopList(stage, skin?.portraitLiveSecondaryLoops);
+}
+
+/** 共浴交互02：intro(_2) → loop(_2_loop)；无 loop 则整段粘住 _2 */
+function resolveBathCoClip2Playback(
+  stage: HTMLElement,
+  characterId: string,
+): { intro: string; loop: string; needIntro: boolean } | null {
+  const list = readDialogueSecondaryList(stage);
+  const intro = list[1];
+  if (!intro) return null;
+  const loops = readDialogueSecondaryLoopList(stage);
+  const loop = loops[1] || intro;
+  const living = getAiLiving();
+  const needIntro = loop !== intro && !getBathIntimateIntroDone(living, characterId);
+  return { intro, loop, needIntro };
+}
+
 function transitionDialogueMs(): number {
   try {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return 80;
@@ -256,6 +307,40 @@ async function waitVideoCanPlay(video: HTMLVideoElement, timeoutMs = 2500): Prom
     video.addEventListener('error', finish, { once: true });
     window.setTimeout(finish, timeoutMs);
   });
+}
+
+/**
+ * 同 secondary 视频原地切 src（脱巾前奏 → loop）。
+ * 不露 primary idle，避免闪默认泡澡皮。
+ */
+async function swapSecondarySrcInPlace(
+  secondary: HTMLVideoElement,
+  nextSrc: string,
+  opts?: { loop?: boolean },
+): Promise<boolean> {
+  const loop = !!opts?.loop;
+  const nextUrl = texUrl(nextSrc);
+  secondary.dataset.skinSrc = nextSrc;
+  secondary.loop = loop;
+  armSilentPortraitVideo(secondary);
+  if (secondary.src !== nextUrl) {
+    secondary.pause();
+    secondary.src = nextUrl;
+    secondary.load();
+  }
+  await waitVideoCanPlay(secondary);
+  try {
+    secondary.currentTime = 0;
+  } catch {
+    /* ignore */
+  }
+  showDialogueSecondaryHard(secondary);
+  try {
+    await secondary.play();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function crossfadeDialogueToSecondary(
@@ -408,6 +493,12 @@ export async function playDialogueSkinClip(
   if (stage.dataset.mode === 'pose') {
     await restoreDialogueSkin(stage, { softMs: 120 });
   }
+  // 共浴脱巾粘住时：播完回粘住层，不回 primary idle
+  const returnSticky =
+    stage.dataset.bathCoStickyClip &&
+    Number(stage.dataset.bathCoStickyClip) >= 1
+      ? Number(stage.dataset.bathCoStickyClip)
+      : null;
   const list = readDialogueSecondaryList(stage);
   if (!list.length) return false;
   if (stage.dataset.skinBusy === '1') return false;
@@ -415,7 +506,17 @@ export async function playDialogueSkinClip(
   stage.dataset.skinBusy = '1';
   try {
     const ok = await crossfadeDialogueToSecondary(stage, list[idx]!);
-    if (ok) await crossfadeDialogueToPrimary(stage);
+    if (ok) {
+      if (returnSticky != null && returnSticky !== clip1Based) {
+        await setDialogueBathCoSticky(stage, returnSticky);
+      } else if (returnSticky === clip1Based) {
+        // 已是目标粘住剪辑，保持 secondary 循环
+        stage.dataset.skinPhase = 'bath-co-sticky';
+        stage.dataset.bathCoStickyClip = String(returnSticky);
+      } else {
+        await crossfadeDialogueToPrimary(stage);
+      }
+    }
     return ok;
   } finally {
     stage.dataset.skinBusy = '0';
@@ -423,13 +524,420 @@ export async function playDialogueSkinClip(
 }
 
 /**
- * 小黑屋专用：粘住姿势循环（null=回 idle 默认态）。
+ * 共浴专用：粘住交互循环（null=回共浴 idle）。
+ * 交互02：先播 _2 脱巾前奏（一次），再粘住 _2_loop 无巾循环；重新裹巾或结束事件时清掉。
+ */
+export async function setDialogueBathCoSticky(
+  stage: HTMLElement,
+  clip1Based: number | null,
+): Promise<boolean> {
+  if (stage.dataset.mode === 'pose') {
+    await restoreDialogueSkin(stage, { softMs: 120 });
+  }
+  if (stage.dataset.skinBusy === '1') {
+    stage.dataset.bathCoStickyPending =
+      clip1Based == null || clip1Based <= 0 ? 'idle' : String(Math.floor(clip1Based));
+    return false;
+  }
+  stage.dataset.skinBusy = '1';
+  try {
+    if (clip1Based == null || clip1Based <= 0) {
+      delete stage.dataset.bathCoStickyClip;
+      delete stage.dataset.bathCoStickySrc;
+      const secondary = stage.querySelector<HTMLVideoElement>('[data-role="skin-secondary"]');
+      hideDialogueSecondaryHard(secondary);
+      if (stage.dataset.skinPhase === 'bath-co-sticky' || stage.dataset.skinPhase === 'out') {
+        await crossfadeDialogueToPrimary(stage);
+      } else {
+        const primary = primarySkinVideo(stage);
+        if (primary) {
+          primary.classList.remove('is-hidden', 'is-exiting');
+          armSilentPortraitVideo(primary);
+          void primary.play().catch(() => {});
+        }
+        hideDialogueSecondaryHard(secondary);
+        stage.dataset.skinPhase = 'idle';
+      }
+      hideDialogueSecondaryHard(
+        stage.querySelector<HTMLVideoElement>('[data-role="skin-secondary"]'),
+      );
+      return true;
+    }
+    const list = readDialogueSecondaryList(stage);
+    if (!list.length) return false;
+    const idx = Math.max(0, Math.min(list.length - 1, Math.floor(clip1Based) - 1));
+    stage.dataset.bathCoStickyClip = String(idx + 1);
+
+    const characterId = stage.dataset.characterId ?? '';
+    const clip2 =
+      idx === 1 && characterId ? resolveBathCoClip2Playback(stage, characterId) : null;
+
+    if (clip2?.needIntro) {
+      const secondaryNow = stage.querySelector<HTMLVideoElement>('[data-role="skin-secondary"]');
+      // 已在播前奏：等它播完再原地接 loop，禁止提前 return 导致永远不进 loop
+      if (
+        stage.dataset.skinPhase === 'bath-co-sticky' &&
+        stage.dataset.bathCoStickySrc === clip2.intro &&
+        secondaryNow &&
+        !secondaryNow.paused &&
+        !secondaryNow.ended
+      ) {
+        await new Promise<void>((resolve) => {
+          const onEnd = () => {
+            secondaryNow.removeEventListener('ended', onEnd);
+            secondaryNow.removeEventListener('error', onEnd);
+            resolve();
+          };
+          secondaryNow.addEventListener('ended', onEnd, { once: true });
+          secondaryNow.addEventListener('error', onEnd, { once: true });
+        });
+      } else {
+        stage.dataset.bathCoStickySrc = clip2.intro;
+        const introOk = await crossfadeDialogueToSecondary(stage, clip2.intro, { sticky: false });
+        if (!introOk) return false;
+        stage.dataset.skinPhase = 'bath-co-sticky';
+      }
+      const living = getAiLiving();
+      setBathIntimateIntroDone(living, characterId, true);
+      saveManager.mutate((d) => {
+        d.aiLiving = living;
+      });
+      const secondary = stage.querySelector<HTMLVideoElement>('[data-role="skin-secondary"]');
+      if (!secondary) return false;
+      // 原地切 loop：不二次 crossfade、不闪 primary idle
+      const loopOk = await swapSecondarySrcInPlace(secondary, clip2.loop, { loop: true });
+      if (loopOk) {
+        stage.dataset.skinPhase = 'bath-co-sticky';
+        stage.dataset.bathCoStickySrc = clip2.loop;
+      }
+      return loopOk;
+    }
+
+    const want = clip2?.loop ?? list[idx]!;
+    if (
+      stage.dataset.skinPhase === 'bath-co-sticky' &&
+      stage.dataset.bathCoStickySrc === want
+    ) {
+      const secondary = stage.querySelector<HTMLVideoElement>('[data-role="skin-secondary"]');
+      if (secondary && !secondary.paused) return true;
+    }
+    const ok = await crossfadeDialogueToSecondary(stage, want, { sticky: true });
+    if (ok) {
+      stage.dataset.skinPhase = 'bath-co-sticky';
+      stage.dataset.bathCoStickySrc = want;
+    }
+    return ok;
+  } finally {
+    stage.dataset.skinBusy = '0';
+    const pending = stage.dataset.bathCoStickyPending;
+    if (pending) {
+      delete stage.dataset.bathCoStickyPending;
+      const n = pending === 'idle' ? null : Number(pending);
+      void setDialogueBathCoSticky(stage, Number.isFinite(n as number) ? (n as number) : null);
+    }
+  }
+}
+
+/**
+ * 独舞无缝链式循环：在 secondary 层按序 [主, _1, _2 …] 首尾相接播放。
+ * 机制：下一段预加载（新 src → canplay），上一段 ended 时切换；不经过 primary idle，
+ * 画面看起来一直在跳。仅独舞演出态调用；返回 false 或中断时由 overlay timer 恢复。
+ */
+export async function playDialogueDanceSoloLoop(
+  stage: HTMLElement,
+  srcs: string[],
+  opts?: { startIndex?: number; signal?: AbortSignal },
+): Promise<boolean> {
+  const primary = primarySkinVideo(stage);
+  let secondary = stage.querySelector<HTMLVideoElement>('[data-role="skin-secondary"]');
+  if (!primary || !secondary || srcs.length === 0) return false;
+  if (opts?.signal?.aborted) return false;
+  if (stage.dataset.mode === 'pose') {
+    await restoreDialogueSkin(stage, { softMs: 120 });
+  }
+  if (stage.dataset.skinBusy === '1') return false;
+  stage.dataset.skinBusy = '1';
+  try {
+    const start = Math.max(0, Math.min(srcs.length - 1, opts?.startIndex ?? 0));
+    armSilentPortraitVideo(secondary);
+    secondary.dataset.skinSrc = srcs[start]!;
+    secondary.src = texUrl(srcs[start]!);
+    secondary.loop = false;
+    secondary.load();
+    await waitVideoCanPlay(secondary);
+
+    stage.dataset.skinPhase = 'out';
+    primary.classList.add('is-hidden');
+    primary.pause();
+    secondary.classList.remove('is-hidden');
+    secondary.classList.add('is-entering');
+    stage.dataset.skinPhase = 'dance-solo-loop';
+    stage.dataset.danceSoloIdx = String(start);
+    stage.dataset.danceSoloCount = String(srcs.length);
+    try {
+      secondary.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
+    try {
+      await secondary.play();
+    } catch {
+      stage.dataset.skinPhase = 'idle';
+      delete stage.dataset.danceSoloIdx;
+      delete stage.dataset.danceSoloCount;
+      primary.classList.remove('is-hidden');
+      void primary.play().catch(() => {});
+      return false;
+    }
+    secondary.classList.remove('is-entering');
+
+    // 链式：每次 ended → 下一段。同一 secondary 原地换 src，无 primary 闪屏。
+    const chain = async () => {
+      for (;;) {
+        if (opts?.signal?.aborted) return;
+        if (stage.dataset.skinPhase !== 'dance-solo-loop') return;
+        await new Promise<void>((resolve) => {
+          const cur = stage.querySelector<HTMLVideoElement>('[data-role="skin-secondary"]');
+          const finish = () => {
+            cur?.removeEventListener('ended', finish);
+            cur?.removeEventListener('error', finish);
+            resolve();
+          };
+          if (!cur || cur.paused || cur.ended) return resolve();
+          cur.addEventListener('ended', finish, { once: true });
+          cur.addEventListener('error', finish, { once: true });
+        });
+        if (opts?.signal?.aborted) return;
+        if (stage.dataset.skinPhase !== 'dance-solo-loop') return;
+        const next = (Number(stage.dataset.danceSoloIdx ?? '0') + 1) % srcs.length;
+        const ok = await swapSecondarySrcInPlace(secondary, srcs[next]!, { loop: false });
+        if (!ok) return;
+        stage.dataset.danceSoloIdx = String(next);
+        stage.dataset.skinPhase = 'dance-solo-loop';
+      }
+    };
+    void chain();
+    return true;
+  } finally {
+    stage.dataset.skinBusy = '0';
+  }
+}
+
+/** 停止独舞链式循环（不碰 primary，由 overlay 后续刷新决定画面） */
+export function stopDialogueDanceSoloLoop(stage: HTMLElement): void {
+  if (stage.dataset.skinPhase === 'dance-solo-loop') {
+    stage.dataset.skinPhase = 'idle';
+  }
+  delete stage.dataset.danceSoloIdx;
+  delete stage.dataset.danceSoloCount;
+}
+
+/**
+ * 安抚过程：切到指定片段并循环（sticky），带柔和过渡。
+ * 与独舞链式不同：只播当前段、不自动推进；推进由攻击按钮（clipIndex+1）驱动。
+ * 必须最后调用（refreshDialogueSkinLayer 会复位可见性）。
+ */
+export async function playDialogueAnfuClip(
+  stage: HTMLElement,
+  src: string,
+  clipIndex: number,
+): Promise<boolean> {
+  // 安抚片段独占一层：绝不复用通用 secondary。
+  // 通用 secondary 会被「换皮刷新 / 长按选段 / AI skin_clip / 情绪图回退」同时争抢，
+  // 共用时必然出现「点了攻击不换段 / 换段后又跳回第一段」的竞态。
+  if (stage.dataset.skinBusy === '1') {
+    // 忙碌不丢请求：排队最后一次目标（攻击连点时以最新片段为准）
+    stage.dataset.anfuPendingSrc = src;
+    stage.dataset.anfuPendingIdx = String(clipIndex);
+    return false;
+  }
+  if (
+    stage.dataset.anfuClipSrc === src &&
+    stage.dataset.anfuClipIdx === String(clipIndex) &&
+    isAnfuLayerShowing(stage)
+  ) {
+    // 幂等：同一段正在播且层可见 → 不重置 currentTime
+    //（否则表现为「每轮对话都把安抚片段从头重播」）
+    return true;
+  }
+  stage.dataset.skinBusy = '1';
+  try {
+    if (stage.dataset.mode === 'pose') {
+      await restoreDialogueSkin(stage, { softMs: 120 });
+    }
+    const ok = await crossfadeToAnfuLayer(stage, src);
+    if (!ok) return false;
+    stage.dataset.skinPhase = 'anfu-clip';
+    stage.dataset.anfuClipIdx = String(clipIndex);
+    stage.dataset.anfuClipSrc = src;
+    return true;
+  } finally {
+    stage.dataset.skinBusy = '0';
+    const pendSrc = stage.dataset.anfuPendingSrc;
+    if (pendSrc) {
+      delete stage.dataset.anfuPendingSrc;
+      const pendIdx = Number(stage.dataset.anfuPendingIdx || '0');
+      delete stage.dataset.anfuPendingIdx;
+      void playDialogueAnfuClip(stage, pendSrc, Number.isFinite(pendIdx) ? pendIdx : 0);
+    }
+  }
+}
+
+/** 安抚层当前是否真的可见且在播（换皮刷新会藏层但保留 dataset，判定必须看真实可见性） */
+function isAnfuLayerShowing(stage: HTMLElement): boolean {
+  const v = stage.querySelector<HTMLVideoElement>('[data-role="anfu-clip"]');
+  if (!v) return false;
+  if (v.hasAttribute('hidden') || v.classList.contains('is-hidden')) return false;
+  return !v.paused;
+}
+
+/** 确保安抚专用层存在（独立于通用 secondary 与 primary，换皮刷新后需重建） */
+function ensureAnfuLayer(stage: HTMLElement): HTMLVideoElement | null {
+  const skin = stage.querySelector<HTMLElement>('[data-role="skin"]');
+  if (!skin) return null;
+  let v = stage.querySelector<HTMLVideoElement>('[data-role="anfu-clip"]');
+  if (!v) {
+    skin.insertAdjacentHTML(
+      'beforeend',
+      `<video class="ai-dlg-layer-media ai-dlg-anfu-clip is-awaiting-play"
+               data-role="anfu-clip"
+               hidden
+               muted playsinline webkit-playsinline disablepictureinpicture
+               controlslist="nodownload nofullscreen noremoteplayback" preload="auto"></video>`,
+    );
+    v = stage.querySelector<HTMLVideoElement>('[data-role="anfu-clip"]');
+  }
+  if (!v) return null;
+  armSilentPortraitVideo(v);
+  return v;
+}
+
+/**
+ * 交叉淡入安抚专用层：所有其他层让位，片段循环播放。
+ * 失败时回滚到 primary，绝不留空白。
+ */
+async function crossfadeToAnfuLayer(stage: HTMLElement, src: string): Promise<boolean> {
+  const primary = primarySkinVideo(stage);
+  const secondary = stage.querySelector<HTMLVideoElement>('[data-role="skin-secondary"]');
+  const anfu = ensureAnfuLayer(stage);
+  const fx = stage.querySelector<HTMLElement>('.ai-dlg-portrait-fx');
+  if (!anfu) return false;
+
+  const sameSrc = anfu.dataset.skinSrc === src;
+  if (!sameSrc) {
+    anfu.dataset.skinSrc = src;
+    anfu.src = texUrl(src);
+    anfu.load();
+  }
+  armSilentPortraitVideo(anfu);
+  anfu.loop = true;
+  await waitVideoCanPlay(anfu);
+
+  stage.dataset.skinPhase = 'out';
+  fx?.classList.add('is-active');
+  primary?.classList.add('is-exiting');
+  await new Promise((r) => window.setTimeout(r, transitionDialogueMs()));
+
+  primary?.pause();
+  primary?.classList.add('is-hidden');
+  primary?.classList.remove('is-exiting');
+  hideDialogueSecondaryHard(secondary);
+
+  if (!sameSrc) {
+    try {
+      anfu.currentTime = 0;
+    } catch {
+      /* ignore seek race */
+    }
+  }
+  showDialogueSecondaryHard(anfu);
+  try {
+    await anfu.play();
+  } catch {
+    fx?.classList.remove('is-active');
+    anfu.classList.add('is-hidden');
+    anfu.setAttribute('hidden', '');
+    primary?.classList.remove('is-hidden');
+    void primary?.play().catch(() => {});
+    stage.dataset.skinPhase = 'idle';
+    return false;
+  }
+  fx?.classList.remove('is-active');
+  return true;
+}
+
+/** 停止安抚片段：隐藏安抚层，交回 primary（由 overlay 后续刷新决定画面） */
+export function stopDialogueAnfuClip(stage: HTMLElement): void {
+  clearAnfuPoseOverlay(stage);
+  const anfu = stage.querySelector<HTMLVideoElement>('[data-role="anfu-clip"]');
+  if (anfu) {
+    anfu.pause();
+    hideDialogueSecondaryHard(anfu);
+  }
+  if (stage.dataset.skinPhase === 'anfu-clip') {
+    stage.dataset.skinPhase = 'idle';
+  }
+  delete stage.dataset.anfuClipIdx;
+  delete stage.dataset.anfuClipSrc;
+  delete stage.dataset.anfuPendingSrc;
+  delete stage.dataset.anfuPendingIdx;
+}
+
+/** 播放一次事件收束片段，结束后切入待机并回调状态层。 */
+export async function playDialogueDisciplineClimax(
+  stage: HTMLElement,
+  climaxSrc: string,
+  aftercareSrc: string,
+  onComplete?: () => void,
+): Promise<boolean> {
+  const secondary = stage.querySelector<HTMLVideoElement>('[data-role="skin-secondary"]');
+  const primary = primarySkinVideo(stage);
+  if (!secondary) return false;
+  secondary.pause();
+  secondary.dataset.skinSrc = climaxSrc;
+  secondary.src = texUrl(climaxSrc);
+  secondary.loop = false;
+  secondary.load();
+  primary?.classList.add('is-hidden');
+  primary?.pause();
+  secondary.classList.remove('is-hidden', 'is-exiting', 'is-entering');
+  stage.dataset.skinPhase = 'discipline-climax';
+  await waitVideoCanPlay(secondary);
+  const finish = () => {
+    secondary.removeEventListener('ended', finish);
+    secondary.dataset.skinSrc = aftercareSrc;
+    secondary.src = texUrl(aftercareSrc);
+    secondary.loop = true;
+    secondary.load();
+    void secondary.play().catch(() => {});
+    stage.dataset.skinPhase = 'discipline-aftercare';
+    onComplete?.();
+  };
+  secondary.addEventListener('ended', finish, { once: true });
+  try {
+    await secondary.play();
+    return true;
+  } catch {
+    secondary.removeEventListener('ended', finish);
+    return false;
+  }
+}
+
+/**
+ * 事件专用：粘住姿势循环（null=回 idle 默认态）。
  * 不会在 ended 后自动回 primary。
  */
 export async function setDialogueDisciplinePose(
   stage: HTMLElement,
   clip1Based: number | null,
+  clipSrc?: string,
 ): Promise<boolean> {
+  // Never trust a stale secondary list after a character/event skin switch.
+  // Re-resolve from the stage character before translating the pose index to a clip.
+  const characterId = stage.dataset.characterId;
+  if (characterId) {
+    syncDialogueSkinPicker(stage, getLivePortraitSecondarySrcs(characterId, CAMP_OPTS));
+  }
   if (stage.dataset.mode === 'pose') {
     await restoreDialogueSkin(stage, { softMs: 120 });
   }
@@ -471,7 +979,7 @@ export async function setDialogueDisciplinePose(
     const list = readDialogueSecondaryList(stage);
     if (!list.length) return false;
     const idx = Math.max(0, Math.min(list.length - 1, Math.floor(clip1Based) - 1));
-    const want = list[idx]!;
+    const want = clipSrc || list[idx]!;
     stage.dataset.disciplinePoseIndex = String(idx + 1);
     // 已在同一粘住姿势且仍在播：禁止重 load，避免卡顿/闪没
     if (
@@ -497,18 +1005,8 @@ export async function setDialogueDisciplinePose(
     return await crossfadeDialogueToSecondary(stage, want, { sticky: true });
   } finally {
     stage.dataset.skinBusy = '0';
-    const pending = stage.dataset.disciplinePosePending;
-    if (pending != null) {
-      delete stage.dataset.disciplinePosePending;
-      queueMicrotask(() => {
-        if (pending === 'idle') {
-          void setDialogueDisciplinePose(stage, null);
-          return;
-        }
-        const n = Number(pending);
-        void setDialogueDisciplinePose(stage, Number.isFinite(n) && n > 0 ? n : null);
-      });
-    }
+    // 事件动作必须严格串行：丢弃过期排队。
+    delete stage.dataset.disciplinePosePending;
   }
 }
 
@@ -570,6 +1068,8 @@ function bindDialogueHoldPicker(stage: HTMLElement): void {
     if (stage.dataset.mode !== 'skin') return;
     if ((stage.dataset.skinPhase ?? 'idle') !== 'idle') return;
     if ((e.target as HTMLElement).closest('[data-live-picker]')) return;
+    // 双指捏合进行中：长按选段让位
+    if (stage.dataset.pinchZoom === '1') return;
 
     holding = true;
     cancelled = false;
@@ -583,6 +1083,7 @@ function bindDialogueHoldPicker(stage: HTMLElement): void {
     clearHoldTimer();
     holdTimer = window.setTimeout(() => {
       if (!holding || cancelled) return;
+      if (stage.dataset.pinchZoom === '1') return;
       pickerVisible = true;
       const picker = stage.querySelector<HTMLElement>('[data-live-picker]');
       picker?.classList.add('is-open');
@@ -650,13 +1151,93 @@ export function ensureDialogueHoldPicker(stage: HTMLElement): void {
   bindDialogueHoldPicker(stage);
 }
 
+/* ===== 双指捏合缩放（聊天页立绘/皮肤） =====
+ * 最大 1.3 倍，双指离开后弹回原尺寸；
+ * 手势只挂在立绘舞台上，不会与底部聊天输入框冲突。
+ */
+const PINCH_MAX_SCALE = 1.3;
+
+function bindDialoguePinchZoom(stage: HTMLElement): void {
+  if (stage.dataset.pinchBound === '1') return;
+  stage.dataset.pinchBound = '1';
+
+  let baseDist = 0;
+  let curScale = 1;
+
+  const touchDist = (t1: Touch, t2: Touch): number =>
+    Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+
+  const applyScale = (s: number, origin?: { x: number; y: number }): void => {
+    if (origin) {
+      const r = stage.getBoundingClientRect();
+      stage.style.transformOrigin = `${origin.x - r.left}px ${origin.y - r.top}px`;
+    }
+    stage.style.transform = `scale(${s})`;
+  };
+
+  /** 双指离开：柔和弹回原尺寸 */
+  const springBack = (): void => {
+    stage.style.transition = 'transform 0.32s cubic-bezier(0.22, 0.61, 0.36, 1)';
+    stage.style.transform = 'scale(1)';
+    curScale = 1;
+    window.setTimeout(() => {
+      stage.style.transition = '';
+    }, 340);
+  };
+
+  stage.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.touches.length !== 2) return;
+      // 第二指落下：进入捏合，取消长按选段，避免二者抢手势
+      stage.dataset.pinchZoom = '1';
+      hideDialoguePicker(stage);
+      baseDist = touchDist(e.touches[0]!, e.touches[1]!);
+      curScale = 1;
+      const mid = {
+        x: (e.touches[0]!.clientX + e.touches[1]!.clientX) / 2,
+        y: (e.touches[0]!.clientY + e.touches[1]!.clientY) / 2,
+      };
+      stage.style.transition = '';
+      applyScale(1, mid);
+      e.preventDefault();
+    },
+    { passive: false },
+  );
+
+  stage.addEventListener(
+    'touchmove',
+    (e) => {
+      if (stage.dataset.pinchZoom !== '1' || e.touches.length < 2) return;
+      const dist = touchDist(e.touches[0]!, e.touches[1]!);
+      if (baseDist > 0) {
+        curScale = Math.max(1, Math.min(PINCH_MAX_SCALE, dist / baseDist));
+        applyScale(curScale);
+      }
+      e.preventDefault();
+    },
+    { passive: false },
+  );
+
+  const endPinch = (e: TouchEvent): void => {
+    if (stage.dataset.pinchZoom !== '1') return;
+    if (e.touches.length >= 2) return;
+    delete stage.dataset.pinchZoom;
+    springBack();
+  };
+  stage.addEventListener('touchend', endPinch);
+  stage.addEventListener('touchcancel', endPinch);
+}
+
 export function bindDialoguePortraitInteractions(root: ParentNode = document): void {
   root.querySelectorAll<HTMLElement>('[data-dialogue-portrait-stage]').forEach((stage) => {
     const characterId = stage.dataset.characterId;
     if (!characterId) return;
     const secondaries = getLivePortraitSecondarySrcs(characterId, CAMP_OPTS);
     syncDialogueSkinPicker(stage, secondaries);
+    syncDialogueSecondaryLoopsFromSkin(stage, characterId);
     ensureDialogueHoldPicker(stage);
+    bindDialoguePinchZoom(stage);
   });
 }
 
@@ -664,6 +1245,13 @@ export function buildDialoguePortraitStageHtml(characterId: string): string {
   const secondaries = getLivePortraitSecondarySrcs(characterId, CAMP_OPTS);
   const hasSecondary = secondaries.length > 0;
   const secondaryListAttr = hasSecondary ? encodeURIComponent(JSON.stringify(secondaries)) : '';
+  const skinId = getRuntimeActiveSkinId(characterId, 'camp');
+  const skin = skinId ? getCharacterSkin(characterId, skinId) : null;
+  const loops = skin?.portraitLiveSecondaryLoops;
+  const secondaryLoopAttr =
+    loops && loops.length
+      ? encodeURIComponent(JSON.stringify(loops.map((x) => (typeof x === 'string' && x ? x : null))))
+      : '';
   const secondaryVideo = hasSecondary
     ? `<video class="ai-dlg-layer-media ai-dlg-skin-secondary is-awaiting-play"
                    data-role="skin-secondary"
@@ -681,6 +1269,7 @@ export function buildDialoguePortraitStageHtml(characterId: string): string {
          data-pose=""
          data-has-secondary="${hasSecondary ? '1' : '0'}"
          data-secondary-list="${secondaryListAttr}"
+         ${secondaryLoopAttr ? `data-secondary-loop-list="${secondaryLoopAttr}"` : ''}
          data-skin-phase="idle">
       <div class="ai-dlg-layer ai-dlg-layer-skin is-active" data-role="skin">
         ${skinMediaHtml(characterId)}
@@ -715,11 +1304,14 @@ function resetDialogueSkinVisibility(stage: HTMLElement): void {
   const primary = primarySkinVideo(stage);
   primary?.classList.remove('is-hidden', 'is-exiting', 'is-entering');
   hideDialogueSecondaryHard(stage.querySelector<HTMLVideoElement>('[data-role="skin-secondary"]'));
+  // 安抚层也要复位：否则换皮/离房后安抚片段仍盖在新皮肤上（表现为「莫名切服装」）
+  hideDialogueSecondaryHard(stage.querySelector<HTMLVideoElement>('[data-role="anfu-clip"]'));
 }
 
 /**
  * 刷新皮肤层（换装后回到 skin 模式）。
  * 必须重建 secondary 列表并复位可见性——保留旧皮 secondary 会导致多皮肤重叠。
+ * 冲澡/换皮：优先原地换 primary src + 淡入淡出，避免整层销毁造成黑屏闪一下。
  */
 export function refreshDialogueSkinLayer(stage: HTMLElement, characterId: string): void {
   const skin = stage.querySelector<HTMLElement>('[data-role="skin"]');
@@ -742,7 +1334,15 @@ export function refreshDialogueSkinLayer(stage: HTMLElement, characterId: string
   stage.dataset.mode = 'skin';
   stage.dataset.pose = '';
 
-  resetDialogueSkinVisibility(stage);
+  const keepBathSticky =
+    stage.dataset.bathCoStickyClip && Number(stage.dataset.bathCoStickyClip) >= 1
+      ? Number(stage.dataset.bathCoStickyClip)
+      : null;
+  const keepStickySrc = stage.dataset.bathCoStickySrc || '';
+  // 安抚片段：换皮刷新会整层重建，必须记住当前段并在重建后恢复，
+  // 否则每轮对话都掉回待机 / 回到第一段（历史上「播一段停住又跳回第一段」的根因之一）。
+  const keepAnfuClipSrc = stage.dataset.anfuClipSrc || '';
+  const keepAnfuClipIdx = stage.dataset.anfuClipIdx || '';
 
   const secondaries = getLivePortraitSecondarySrcs(characterId, CAMP_OPTS);
   const hasSecondary = secondaries.length > 0;
@@ -751,6 +1351,71 @@ export function refreshDialogueSkinLayer(stage: HTMLElement, characterId: string
   stage.dataset.secondaryList = hasSecondary
     ? encodeURIComponent(JSON.stringify(secondaries))
     : '';
+  syncDialogueSecondaryLoopsFromSkin(stage, characterId);
+
+  const showerPlan = resolveCampShowerPortraitPlayback(characterId);
+  const nextLive = showerPlan?.src ?? getLivePortraitSrc(characterId, CAMP_OPTS);
+  const existingPrimary = primarySkinVideo(stage);
+
+  // 软切：已有视频 primary 且目标仍是视频 → 原地换 src + 淡入，不黑屏整层重建
+  if (existingPrimary && nextLive) {
+    const nextUrl = texUrl(nextLive);
+    const srcChanged = existingPrimary.src !== nextUrl;
+    resetDialogueSkinVisibility(stage);
+    if (keepBathSticky != null) {
+      stage.dataset.bathCoStickyClip = String(keepBathSticky);
+      if (keepStickySrc) stage.dataset.bathCoStickySrc = keepStickySrc;
+    }
+    if (srcChanged) {
+      existingPrimary.classList.add('is-exiting');
+      window.setTimeout(() => {
+        applyCampPortraitVideo(existingPrimary, characterId, showerPlan);
+        existingPrimary.classList.remove('is-exiting', 'is-awaiting-play');
+        existingPrimary.classList.add('is-entering');
+        window.setTimeout(() => existingPrimary.classList.remove('is-entering'), transitionDialogueMs());
+      }, Math.min(220, transitionDialogueMs()));
+    } else {
+      applyCampPortraitVideo(existingPrimary, characterId, showerPlan);
+    }
+    // 同步 secondary 壳（列表可能变）
+    let secondary = stage.querySelector<HTMLVideoElement>('[data-role="skin-secondary"]');
+    if (hasSecondary) {
+      if (!secondary) {
+        skin.insertAdjacentHTML(
+          'beforeend',
+          `<video class="ai-dlg-layer-media ai-dlg-skin-secondary is-awaiting-play"
+                   data-role="skin-secondary"
+                   data-skin-src="${secondaries[0]!}"
+                   src="${texUrl(secondaries[0]!)}"
+                   hidden
+                   muted playsinline webkit-playsinline disablepictureinpicture controlslist="nodownload nofullscreen noremoteplayback" preload="metadata"></video>`,
+        );
+        secondary = stage.querySelector<HTMLVideoElement>('[data-role="skin-secondary"]');
+        if (secondary) armSilentPortraitVideo(secondary);
+      }
+    } else {
+      secondary?.remove();
+    }
+    syncDialogueSkinPicker(stage, secondaries);
+    ensureDialogueHoldPicker(stage);
+    if (keepBathSticky != null) {
+      void setDialogueBathCoSticky(stage, keepBathSticky);
+    } else if (keepAnfuClipSrc) {
+      const idx = Number(keepAnfuClipIdx || '0');
+      void playDialogueAnfuClip(stage, keepAnfuClipSrc, Number.isFinite(idx) ? idx : 0);
+    }
+    return;
+  }
+
+  resetDialogueSkinVisibility(stage);
+  if (keepBathSticky != null) {
+    stage.dataset.bathCoStickyClip = String(keepBathSticky);
+    if (keepStickySrc) stage.dataset.bathCoStickySrc = keepStickySrc;
+  }
+  if (keepAnfuClipSrc) {
+    stage.dataset.anfuClipSrc = keepAnfuClipSrc;
+    if (keepAnfuClipIdx) stage.dataset.anfuClipIdx = keepAnfuClipIdx;
+  }
 
   // 整层重建：旧皮 secondary / 隐藏的 primary 一并丢掉
   skin.innerHTML =
@@ -767,6 +1432,12 @@ export function refreshDialogueSkinLayer(stage: HTMLElement, characterId: string
   playStageVideos(stage);
   syncDialogueSkinPicker(stage, secondaries);
   ensureDialogueHoldPicker(stage);
+  if (keepBathSticky != null) {
+    void setDialogueBathCoSticky(stage, keepBathSticky);
+  } else if (keepAnfuClipSrc) {
+    const idx = Number(keepAnfuClipIdx || '0');
+    void playDialogueAnfuClip(stage, keepAnfuClipSrc, Number.isFinite(idx) ? idx : 0);
+  }
 }
 
 export type ApplyPoseOpts = {
@@ -852,6 +1523,31 @@ function schedulePoseHoldRevert(
   stage.dataset.poseHoldTimer = String(timer);
 }
 
+/** 清除安抚期间的叠层表情（不碰安抚片段层本身） */
+function clearAnfuPoseOverlay(stage: HTMLElement): void {
+  stage.classList.remove('is-anfu-pose');
+  delete stage.dataset.anfuPoseToken;
+  const poseLayer = stage.querySelector<HTMLElement>('[data-role="pose"]');
+  const poseImg = stage.querySelector<HTMLImageElement>('[data-pose-img]');
+  if (poseLayer) {
+    poseLayer.classList.remove('is-active', 'is-entering', 'is-exiting');
+    poseLayer.setAttribute('aria-hidden', 'true');
+  }
+  if (poseImg) poseImg.hidden = true;
+}
+
+function scheduleAnfuPoseClear(stage: HTMLElement, ms: number): void {
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  stage.dataset.anfuPoseToken = token;
+  window.setTimeout(() => {
+    if (stage.dataset.anfuPoseToken !== token) return;
+    if (!document.body.contains(stage)) return;
+    // 已离开安抚相：交给常规皮肤/表情逻辑，别误清别层
+    if (stage.dataset.skinPhase !== 'anfu-clip' && !stage.dataset.anfuClipSrc) return;
+    clearAnfuPoseOverlay(stage);
+  }, Math.max(700, ms));
+}
+
 /**
  * 对话回合：有 emotion_pose → 隐藏皮肤显示情绪图；无资源则保持/回到皮肤。
  * 情绪图停留 2–3 秒后自动回皮肤。
@@ -869,6 +1565,9 @@ export async function applyDialogueEmotionPose(
   stage.dataset.characterId = characterId;
   clearPoseHoldTimer(stage);
 
+  // 安抚片段进行中：情绪图不再整层替换皮肤（会把片段藏掉），
+  // 改为叠在片段层上方短暂显示，到点自动淡出，片段继续播。
+
   const poseLayer = stage.querySelector<HTMLElement>('[data-role="pose"]');
   const skinLayer = stage.querySelector<HTMLElement>('[data-role="skin"]');
   const poseImg = stage.querySelector<HTMLImageElement>('[data-pose-img]');
@@ -880,6 +1579,47 @@ export async function applyDialogueEmotionPose(
 
   const path = poseKey ? emotionPosePath(characterId, poseKey) : null;
   const url = path ? texUrl(path) : null;
+
+  // 安抚片段播放中：表情图叠在片段上方短暂显示（非整层替换）
+  if (stage.dataset.skinPhase === 'anfu-clip' || stage.dataset.anfuClipSrc) {
+    if (!url || !poseKey) {
+      clearAnfuPoseOverlay(stage);
+      stage.dataset.busy = '0';
+      return;
+    }
+    const anfuPoseLayer = stage.querySelector<HTMLElement>('[data-role="pose"]');
+    const anfuPoseImg = stage.querySelector<HTMLImageElement>('[data-pose-img]');
+    if (!anfuPoseLayer || !anfuPoseImg) {
+      stage.dataset.busy = '0';
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      const fileHint = url.split('/').pop() || '';
+      if (anfuPoseImg.getAttribute('src')?.includes(fileHint) && anfuPoseImg.complete) {
+        resolve();
+        return;
+      }
+      const onDone = () => {
+        anfuPoseImg.removeEventListener('load', onDone);
+        anfuPoseImg.removeEventListener('error', onDone);
+        resolve();
+      };
+      anfuPoseImg.addEventListener('load', onDone, { once: true });
+      anfuPoseImg.addEventListener('error', onDone, { once: true });
+      anfuPoseImg.hidden = false;
+      anfuPoseImg.src = url;
+      if (anfuPoseImg.complete) onDone();
+    });
+    stage.classList.add('is-anfu-pose');
+    anfuPoseLayer.classList.add('is-active');
+    anfuPoseLayer.setAttribute('aria-hidden', 'false');
+    scheduleAnfuPoseClear(
+      stage,
+      opts.holdMs ?? resolveEmotionPoseHoldMs(poseKey, opts.emotion),
+    );
+    stage.dataset.busy = '0';
+    return;
+  }
 
   if (!url || !poseKey) {
     await fadeToSkin(stage, skinLayer, poseLayer, poseImg, fx);
@@ -978,7 +1718,7 @@ async function fadeToSkin(
 ): Promise<void> {
   clearPoseHoldTimer(stage);
   if (stage.dataset.mode === 'skin') {
-    // 情绪图已关但仍可能需续播小黑屋粘住姿势
+    // 情绪图已关但仍可能需续播事件粘住姿势
     await resumeDisciplineSkinPlayback(stage);
     return;
   }
@@ -1006,7 +1746,7 @@ async function fadeToSkin(
 }
 
 /**
- * 情绪图结束后回到皮肤层：若小黑屋粘住姿势仍有效则续播 secondary，否则播 idle primary。
+ * 情绪图结束后回到皮肤层：若事件粘住姿势仍有效则续播 secondary，否则播 idle primary。
  * 避免「情绪图盖住姿势 → 回皮肤只播 idle → 姿势卡没」。
  */
 async function resumeDisciplineSkinPlayback(stage: HTMLElement): Promise<void> {
@@ -1014,6 +1754,16 @@ async function resumeDisciplineSkinPlayback(stage: HTMLElement): Promise<void> {
   const secondary = stage.querySelector<HTMLVideoElement>('[data-role="skin-secondary"]');
   const stickySrc = stage.dataset.disciplineStickyClip || '';
   const poseIdx = Number(stage.dataset.disciplinePoseIndex || '0');
+
+  if (stage.dataset.skinPhase === 'discipline-aftercare' && secondary) {
+    secondary.loop = true;
+    secondary.classList.remove('is-hidden', 'is-exiting', 'is-entering');
+    primary?.classList.add('is-hidden');
+    primary?.pause();
+    armSilentPortraitVideo(secondary);
+    void secondary.play().catch(() => {});
+    return;
+  }
 
   if (stickySrc && poseIdx > 0 && secondary) {
     if (secondary.dataset.skinSrc !== stickySrc) {

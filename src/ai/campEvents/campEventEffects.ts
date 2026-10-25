@@ -5,19 +5,27 @@
  * 事件结束后清除临时外覆 → 回落到 campWornSkins，否则默认原皮。
  */
 import {
+  ANFU_TEMP_SKIN_INSTANCE,
   BATHE_TEMP_SKIN_INSTANCE,
+  BATH_ASSIST_TEMP_SKIN_INSTANCE,
+  BATH_CO_SKIN_ID,
+  BATH_HELP_SKIN_ID,
   CASUAL_FASHION_SKIN_ID,
+  DANCE_IDLE_SKIN_ID,
+  DANCE_TEMP_SKIN_INSTANCE,
   DISCIPLINE_TEMP_SKIN_INSTANCE,
   getCharacterSkin,
   getCharacterSkins,
+  isAloneBathSkinId,
   isOutfitChangeProcessSkin,
   POOL_PARTY_SKIN_ID,
-  SHOWER_SKIN_ID,
+  resolveAloneBathSkinId,
   SLEEPWEAR_SKIN_ID,
 } from '../../data/characterSkins';
 import { CHARACTER_MAP } from '../../data/characters';
 import type { SaveData } from '../../types';
 import { getCampWornSkinId } from '../campOutfit';
+import { forceScheduleOutfitChange, scheduleEventTempSkinChange } from '../outfitChangeProcess';
 import { pushCampLog, pushMemory } from '../memory';
 import { clearAllStaleBathIntimateConsent, isBathingForIntimateConsent } from '../bathIntimateConsent';
 import type { AiLivingSave, EventTempSkinState } from '../types';
@@ -40,6 +48,8 @@ export const EVENT_AUTO_SKIN: Record<string, string> = {
   /** 娱乐夜：优先都市私服（无资源则事件内不会换上） */
   entertainment_night: CASUAL_FASHION_SKIN_ID,
   sleepwalk_scare: SLEEPWEAR_SKIN_ID,
+  /** 舞蹈派对：全体换「舞蹈待机」准备皮（起身舞姿循环） */
+  dance_party: DANCE_IDLE_SKIN_ID,
 };
 
 function ensureTempMap(living: AiLivingSave): Record<string, EventTempSkinState> {
@@ -99,10 +109,15 @@ export function setEventTempSkin(
   return true;
 }
 
-/** 事件结束：清掉该实例留下的临时外覆 */
+/**
+ * 事件结束：清掉该实例留下的临时外覆。
+ * 默认同时取消该实例排队中的临时换装，并让角色走一次「换回日常」的换装过程；
+ * 会话类事件（舞蹈/安抚/浴室）自己组织散场，可传 dressBack:false。
+ */
 export function clearEventTempSkinsForInstance(
   living: AiLivingSave,
   eventInstanceId: string,
+  opts?: { dressBack?: boolean },
 ): string[] {
   const map = ensureTempMap(living);
   const cleared: string[] = [];
@@ -110,6 +125,18 @@ export function clearEventTempSkinsForInstance(
     if (st.eventInstanceId === eventInstanceId) {
       delete map[cid];
       cleared.push(cid);
+    }
+  }
+  const pending = living.pendingOutfitChanges ?? {};
+  for (const [cid, p] of Object.entries(pending)) {
+    if (p.applyAsTempInstanceId === eventInstanceId) {
+      delete pending[cid];
+      if (!cleared.includes(cid)) cleared.push(cid);
+    }
+  }
+  if (opts?.dressBack !== false) {
+    for (const cid of cleared) {
+      forceScheduleOutfitChange(living, cid, getCampWornSkinId(living, cid), 4_200);
     }
   }
   return cleared;
@@ -132,8 +159,11 @@ export function applyEventTempSkins(save: SaveData, living: AiLivingSave): void 
     const noAsset: string[] = [];
 
     for (const p of joiners) {
-      // 小黑屋的约束皮是活动会话唯一持有的临时层，营地事件不得覆盖。
+      // 事件临时皮由活动会话唯一持有，营地事件不得覆盖。
       if (living.eventTempSkins?.[p.characterId]?.eventInstanceId === DISCIPLINE_TEMP_SKIN_INSTANCE) {
+        continue;
+      }
+      if (living.eventTempSkins?.[p.characterId]?.eventInstanceId === ANFU_TEMP_SKIN_INSTANCE) {
         continue;
       }
       const skins = getCharacterSkins(p.characterId);
@@ -159,14 +189,20 @@ export function applyEventTempSkins(save: SaveData, living: AiLivingSave): void 
         continue;
       }
 
-      if (setEventTempSkin(save, living, p.characterId, autoSkinId, ev.instanceId)) {
+      const q = scheduleEventTempSkinChange(living, p.characterId, autoSkinId, ev.instanceId);
+      if (q.queued) {
         switched.push(p.characterId);
         const name = getCharacterSkin(p.characterId, autoSkinId)?.name ?? autoSkinId;
         pushMemory(living, p.characterId, {
           kind: 'event',
-          summary: `营地事件：临时换上「${name}」（结束后换回营地日常/默认原皮）`,
+          summary: `营地事件：开始换上「${name}」（先换衣再显形，结束后换回营地日常/默认原皮）`,
           importance: 5,
         });
+      } else if (
+        living.eventTempSkins?.[p.characterId]?.skinId === autoSkinId ||
+        living.pendingOutfitChanges?.[p.characterId]?.targetSkinId === autoSkinId
+      ) {
+        switched.push(p.characterId);
       }
     }
 
@@ -226,8 +262,9 @@ export function isCharacterBathing(living: AiLivingSave, characterId: string): b
 }
 
 /**
- * 「蒸汽毛巾」(pifu03)：洗浴时刻挂临时外覆；出浴室清除。
- * 不依赖是否购买；不改主页玩家装备。营地事件临时皮优先。
+ * 独自洗浴临时外覆：优先「独自泡澡」(pifu09)，无资源回退「蒸汽毛巾」(pifu03)。
+ * 浴室泡澡/冲澡时刻挂上；出浴室清除。不依赖购买；不改主页玩家装备。
+ * 帮洗/共浴 (bath_assist) 进行中不覆盖。
  */
 export function applyBatheShowerSkins(save: SaveData, living: AiLivingSave): void {
   const map = ensureTempMap(living);
@@ -239,20 +276,34 @@ export function applyBatheShowerSkins(save: SaveData, living: AiLivingSave): voi
 
   for (const id of ids) {
     const current = map[id];
-    // 约束皮由小黑屋会话管理，洗浴同步不得换上或清除它。
+    // 事件皮由会话管理，洗浴同步不得换上或清除它。
     if (current?.eventInstanceId === DISCIPLINE_TEMP_SKIN_INSTANCE) continue;
-    const hasAsset = getCharacterSkins(id).some((s) => s.id === SHOWER_SKIN_ID);
-    if (!hasAsset) continue;
+    // 帮洗/共浴(pifu07/pifu08)由 bathAssistSession 管理，不得被独自泡澡覆盖或清除。
+    // 注意：BATH_ASSIST_TEMP_SKIN_INSTANCE 与 BATHE_TEMP_SKIN_INSTANCE 同值，
+    // 必须按"皮肤 id"区分，否则独自浴巾也会被一起跳过（离浴室后浴巾不脱）。
+    if (current?.skinId === BATH_HELP_SKIN_ID || current?.skinId === BATH_CO_SKIN_ID) {
+      continue;
+    }
+    // 舞蹈事件由 danceSession 管理，不得被独自泡澡覆盖或清除。
+    if (current?.eventInstanceId === DANCE_TEMP_SKIN_INSTANCE) continue;
+    // 安抚事件由 anfuSession 管理，不得被独自泡澡覆盖或清除。
+    if (current?.eventInstanceId === ANFU_TEMP_SKIN_INSTANCE) continue;
+    const aloneId = resolveAloneBathSkinId(id);
+    if (!aloneId) continue;
 
-    // 换装进行中 / 叙事换装锁：不瞬间挂毛巾皮，也不扒掉（等协议收尾）
+    // 换装进行中 / 叙事换装锁：不瞬间挂洗浴皮，也不扒掉（等协议收尾）
     if (outfitTransitionHoldActive(living, id)) continue;
 
     const bathing = isCharacterBathing(living, id);
     const temp = map[id];
-    const isBatheTemp = temp?.eventInstanceId === BATHE_TEMP_SKIN_INSTANCE;
+    // 独自泡澡临时层判定必须看"皮肤 id"：BATH_ASSIST_TEMP_SKIN_INSTANCE 与
+    // BATHE_TEMP_SKIN_INSTANCE 是同一个值，只看 instance 会把帮洗/共浴皮也当成独自泡澡皮。
+    const isBatheTemp =
+      !!temp && isAloneBathSkinId(temp.skinId) && temp.eventInstanceId === BATHE_TEMP_SKIN_INSTANCE;
 
-    // 营地日常误穿冲澡皮：非洗浴时脱下
-    if (getCampWornSkinId(living, id) === SHOWER_SKIN_ID && !bathing) {
+    // 营地日常误穿独自洗浴皮：非洗浴时脱下
+    const worn = getCampWornSkinId(living, id);
+    if (isAloneBathSkinId(worn) && !bathing) {
       if (!living.campWornSkins) living.campWornSkins = {};
       delete living.campWornSkins[id];
     }
@@ -260,13 +311,16 @@ export function applyBatheShowerSkins(save: SaveData, living: AiLivingSave): voi
     if (bathing) {
       // 其他事件临时皮优先
       if (temp && !isBatheTemp) continue;
-      if (temp?.skinId === SHOWER_SKIN_ID && isBatheTemp) continue;
-      setEventTempSkin(save, living, id, SHOWER_SKIN_ID, BATHE_TEMP_SKIN_INSTANCE);
+      // 已是目标独自皮则不动（含从 pifu03 升到 pifu09 时仍会重挂）
+      if (temp?.skinId === aloneId && isBatheTemp) continue;
+      // 先换衣再显形：浴室外/浴室里都要有"脱/裹"的过程，不瞬间挂浴巾
+      scheduleEventTempSkinChange(living, id, aloneId, BATHE_TEMP_SKIN_INSTANCE, 2_800);
       continue;
     }
 
     if (isBatheTemp) {
       delete map[id];
+      forceScheduleOutfitChange(living, id, getCampWornSkinId(living, id), 3_600);
     }
   }
 

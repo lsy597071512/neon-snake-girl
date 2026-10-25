@@ -1,0 +1,1045 @@
+/* ── 唤醒协议 · 构装体招募（征召大厅） ───────────────────────────
+   全屏竖屏抽卡页：动态背景展柜 + 等级排布 + 单抽/十连 + 召唤过场 + 白光揭晓。
+   色调与店内 UI 统一：深空锈底 + 铜金描线；SR 冰蓝 / SSR 绛紫 / UR 熔金。 */
+
+.recruit-page {
+  position: fixed;
+  inset: 0;
+  z-index: 10040;
+  overflow: hidden;
+  background: #05060a;
+  opacity: 0;
+  transition: opacity 0.32s ease;
+  touch-action: pan-y;
+  --recruit-sr: #5fc8ff;
+  --recruit-ssr: #b06bff;
+  --recruit-ur: #ffd069;
+  --recruit-gold: #e8c878;
+}
+
+.recruit-page.is-visible {
+  opacity: 1;
+}
+
+.recruit-page.is-leaving {
+  opacity: 0;
+}
+
+/* —— 背景：静止底图 + 缓慢呼吸（微微缩放 / 偏移） —— */
+.recruit-bg {
+  position: absolute;
+  inset: -4%;
+}
+
+.recruit-bg-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 30%;
+  transform-origin: 50% 42%;
+  animation: recruit-bg-breathe 22s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+@keyframes recruit-bg-breathe {
+  0% {
+    transform: scale(1.04) translate(0.4%, 0.2%);
+  }
+  35% {
+    transform: scale(1.1) translate(-0.9%, -0.5%);
+  }
+  70% {
+    transform: scale(1.07) translate(0.8%, 0.7%);
+  }
+  100% {
+    transform: scale(1.12) translate(-0.4%, -0.9%);
+  }
+}
+
+.recruit-bg-shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(3, 4, 8, 0.66) 0%, rgba(3, 4, 8, 0.1) 26%, rgba(3, 4, 8, 0) 52%, rgba(3, 4, 8, 0.42) 78%, rgba(3, 4, 8, 0.88) 100%),
+    radial-gradient(120% 60% at 50% 108%, rgba(0, 0, 0, 0.62), transparent 60%),
+    /* 展柜区中心暗化：压掉底图细节，让立绘与等级光成为视觉主体 */
+    radial-gradient(78% 52% at 50% 62%, rgba(3, 4, 9, 0.72) 0%, rgba(3, 4, 9, 0.42) 52%, transparent 78%);
+  pointer-events: none;
+}
+
+.recruit-bg-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.5;
+  background-image: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 3px);
+  pointer-events: none;
+}
+
+/* 顶部扫过的微光，营造“协议运行中” */
+.recruit-bg-beam {
+  position: absolute;
+  left: -20%;
+  right: -20%;
+  top: -30%;
+  height: 46%;
+  background: linear-gradient(180deg, transparent, rgba(255, 214, 140, 0.07) 55%, transparent);
+  transform: skewY(-8deg);
+  animation: recruit-beam 11s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes recruit-beam {
+  0% {
+    transform: translateY(-70%) skewY(-8deg);
+  }
+  100% {
+    transform: translateY(320%) skewY(-8deg);
+  }
+}
+
+/* —— 顶栏 —— */
+.recruit-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    'back title hud'
+    '. rates .';
+  align-items: start;
+  gap: 4px 8px;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) 12px 0;
+}
+
+.recruit-back {
+  grid-area: back;
+  border: 1px solid rgba(232, 200, 120, 0.5);
+  border-radius: 999px;
+  background: rgba(6, 8, 12, 0.72);
+  color: #f0dcc8;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding: 7px 12px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.recruit-back:active {
+  transform: scale(0.95);
+}
+
+.recruit-title {
+  grid-area: title;
+  text-align: center;
+  min-width: 0;
+}
+
+.recruit-title h2 {
+  margin: 2px 0 2px;
+  font-size: clamp(14px, 3.9vw, 20px);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #f4e7cf;
+  white-space: nowrap;
+  text-shadow: 0 0 18px rgba(255, 190, 110, 0.35), 0 2px 10px rgba(0, 0, 0, 0.85);
+}
+
+.recruit-rates {
+  grid-area: rates;
+  margin: 2px 0 0;
+  text-align: center;
+  font-size: clamp(9px, 2.5vw, 11px);
+  color: rgba(240, 220, 200, 0.85);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recruit-rates i {
+  font-style: normal;
+  opacity: 0.5;
+  margin: 0 2px;
+}
+
+.recruit-rate.is-ssr {
+  color: var(--recruit-ssr);
+}
+
+.recruit-rate.is-ur {
+  color: var(--recruit-ur);
+}
+
+.recruit-hud {
+  grid-area: hud;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.recruit-wallet {
+  display: flex;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid rgba(232, 200, 120, 0.35);
+  border-radius: 999px;
+  background: rgba(6, 8, 12, 0.72);
+  font-size: 12px;
+  color: #f0dcc8;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+}
+
+.recruit-wallet b {
+  color: #ffd98a;
+}
+
+/* —— 等级展柜（三层纵深：前大 / 中次 / 后小） —— */
+.recruit-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: clamp(2px, 1.4vh, 12px);
+  padding: 84px 0 clamp(96px, 17vh, 132px);
+  pointer-events: none;
+}
+
+.recruit-tier {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: clamp(4px, 1.6vw, 16px);
+  width: 100%;
+}
+
+/**
+ * 站台台基：每层脚下铺一条发光地台线。
+ * 前排暖金、中排冷蓝、后排暗紫 —— 与等级色呼应，同时把「谁在前谁在后」钉死在视觉上。
+ */
+.recruit-tier::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -2px;
+  transform: translateX(-50%);
+  height: 2px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.recruit-tier.is-front::after {
+  width: min(78%, 460px);
+  background: linear-gradient(90deg, transparent, rgba(255, 208, 105, 0.5) 22%, rgba(255, 224, 160, 0.72) 50%, rgba(255, 208, 105, 0.5) 78%, transparent);
+  box-shadow: 0 0 14px rgba(255, 196, 100, 0.45);
+}
+
+.recruit-tier.is-mid::after {
+  width: min(84%, 520px);
+  background: linear-gradient(90deg, transparent, rgba(150, 200, 255, 0.34) 26%, rgba(190, 220, 255, 0.5) 50%, rgba(150, 200, 255, 0.34) 74%, transparent);
+  box-shadow: 0 0 10px rgba(140, 190, 255, 0.28);
+}
+
+.recruit-tier.is-back::after {
+  width: min(86%, 560px);
+  background: linear-gradient(90deg, transparent, rgba(180, 150, 255, 0.2) 30%, rgba(200, 175, 255, 0.3) 50%, rgba(180, 150, 255, 0.2) 70%, transparent);
+  box-shadow: none;
+}
+
+/* 后排压暗做气势，中排略暗，前排高光 */
+.recruit-tier.is-back {
+  transform: scale(0.9);
+  filter: brightness(0.58) saturate(0.78);
+  opacity: 0.86;
+}
+
+/* 后排只做氛围剪影，标签收起避免与中排重叠 */
+.recruit-tier.is-back .recruit-figure-tag {
+  display: none;
+}
+
+.recruit-tier.is-mid .recruit-figure-tag {
+  transform: scale(0.88);
+}
+
+.recruit-tier.is-mid {
+  filter: brightness(0.86);
+}
+
+/* 每排向上让出一点间距，避免上下排立绘互相咬合 */
+.recruit-tier.is-back {
+  margin-bottom: clamp(10px, 2.4vh, 20px);
+}
+
+.recruit-tier.is-mid {
+  margin-bottom: clamp(4px, 1.2vh, 10px);
+}
+
+.recruit-tier.is-back .recruit-figure-art {
+  max-height: 14vh;
+}
+
+.recruit-tier.is-mid .recruit-figure-art {
+  max-height: 18.5vh;
+}
+
+.recruit-tier.is-front .recruit-figure-art {
+  max-height: 29vh;
+}
+
+.recruit-figure {
+  position: relative;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* 入场：由下淡入 + 呼吸浮动（错峰由 --enter-delay / --float-dur 控制） */
+  opacity: 0;
+  animation:
+    recruit-enter 1.1s ease var(--enter-delay, 0s) forwards,
+    recruit-float var(--float-dur, 6s) ease-in-out 1.2s infinite;
+}
+
+/* 席位宽度分档：UR 最宽 > SSR > SR */
+.is-front .recruit-figure.is-ur {
+  width: clamp(112px, 31vw, 168px);
+  z-index: 3;
+}
+
+.is-front .recruit-figure.is-ssr {
+  width: clamp(88px, 24vw, 130px);
+  z-index: 2;
+}
+
+.is-mid .recruit-figure {
+  width: clamp(72px, 19vw, 108px);
+  z-index: 1;
+}
+
+.is-back .recruit-figure {
+  width: clamp(58px, 15vw, 88px);
+  z-index: 0;
+}
+
+@keyframes recruit-enter {
+  0% {
+    opacity: 0;
+    margin-bottom: -26px;
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    margin-bottom: 0;
+  }
+}
+
+@keyframes recruit-float {
+  0%,
+  100% {
+    margin-bottom: 0;
+  }
+  50% {
+    margin-bottom: 10px;
+  }
+}
+
+.recruit-figure-art {
+  width: 100%;
+  height: auto;
+  max-height: 34vh;
+  object-fit: contain;
+  object-position: center bottom;
+  filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.62));
+}
+
+.is-ssr .recruit-figure-art {
+  filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.65)) drop-shadow(0 0 30px rgba(176, 107, 255, 0.28));
+}
+
+.is-ur .recruit-figure-art {
+  filter: drop-shadow(0 16px 24px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 40px rgba(255, 208, 105, 0.42));
+}
+
+/* 底部椭圆投影 */
+.recruit-figure-shadow {
+  width: 72%;
+  height: 14px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(0, 0, 0, 0.66), transparent 70%);
+  filter: blur(1px);
+  animation: recruit-shadow-pulse var(--float-dur, 6s) ease-in-out infinite;
+  animation-delay: 1.2s;
+}
+
+@keyframes recruit-shadow-pulse {
+  0%,
+  100% {
+    transform: scaleX(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scaleX(0.86);
+    opacity: 0.65;
+  }
+}
+
+/* 等级光晕环（随呼吸明灭 → “消失又出现”的仪式感） */
+.recruit-figure-glow {
+  position: absolute;
+  inset: -12% -18% 8%;
+  z-index: -1;
+  border-radius: 50%;
+  animation: recruit-glow-breathe var(--float-dur, 6s) ease-in-out infinite;
+  animation-delay: 1.2s;
+}
+
+.is-sr .recruit-figure-glow {
+  background: radial-gradient(50% 50% at 50% 62%, rgba(95, 200, 255, 0.3), transparent 70%);
+}
+
+.is-ssr .recruit-figure-glow {
+  background: radial-gradient(50% 50% at 50% 62%, rgba(176, 107, 255, 0.36), transparent 70%);
+}
+
+.is-ur .recruit-figure-glow {
+  background: radial-gradient(50% 50% at 50% 60%, rgba(255, 208, 105, 0.44), transparent 72%);
+}
+
+@keyframes recruit-glow-breathe {
+  0%,
+  100% {
+    opacity: 0.75;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.25;
+    transform: scale(0.94);
+  }
+}
+
+.recruit-figure-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  background: rgba(4, 6, 10, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(6px);
+}
+
+.recruit-figure-tag b {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #f2e6d2;
+  white-space: nowrap;
+}
+
+.recruit-figure-rarity {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #06121c;
+  background: var(--recruit-sr);
+  box-shadow: 0 0 12px rgba(95, 200, 255, 0.75);
+}
+
+.recruit-figure-rarity.ssr {
+  background: var(--recruit-ssr);
+  color: #160a26;
+  box-shadow: 0 0 12px rgba(176, 107, 255, 0.75);
+}
+
+.recruit-figure-rarity.ur {
+  background: linear-gradient(180deg, #ffe9b0, var(--recruit-ur));
+  color: #2a1a05;
+  box-shadow: 0 0 16px rgba(255, 208, 105, 0.9);
+}
+
+/* —— 底部抽卡按钮 —— */
+.recruit-actions {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  padding: 14px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(180deg, transparent, rgba(3, 4, 8, 0.55) 40%, rgba(3, 4, 8, 0.9));
+}
+
+.recruit-pull {
+  position: relative;
+  flex: 1;
+  max-width: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 10px 11px;
+  border-radius: 14px;
+  cursor: pointer;
+  color: #2b1c08;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease, filter 0.2s ease;
+}
+
+.recruit-pull:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.recruit-pull:disabled {
+  filter: grayscale(0.6) brightness(0.7);
+  cursor: not-allowed;
+}
+
+.recruit-pull.is-single {
+  background: linear-gradient(180deg, #3f5a72, #232f42 60%, #1a2233);
+  color: #d9ecff;
+  border: 1px solid rgba(140, 200, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 6px 22px rgba(70, 140, 220, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.recruit-pull.is-ten {
+  background: linear-gradient(180deg, #ffe3a1, #e0a44c 55%, #9a6420);
+  color: #2b1c08;
+  border: 1px solid rgba(255, 230, 170, 0.8);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 6px 26px rgba(255, 190, 90, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  animation: recruit-ten-shine 3.2s ease-in-out infinite;
+}
+
+@keyframes recruit-ten-shine {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.12);
+  }
+}
+
+.recruit-pull-label {
+  font-size: 17px;
+}
+
+.recruit-pull-cost {
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.recruit-toast {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  bottom: 108px;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: rgba(5, 7, 11, 0.85);
+  border: 1px solid rgba(232, 200, 120, 0.5);
+  color: #ffe9c4;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* —— 召唤过场视频 —— */
+.recruit-cutscene {
+  position: fixed;
+  inset: 0;
+  z-index: 10060;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  opacity: 0;
+  transition: opacity 0.28s ease;
+  touch-action: none;
+}
+
+.recruit-cutscene.is-visible {
+  opacity: 1;
+}
+
+.recruit-cutscene.is-closing {
+  opacity: 0;
+}
+
+.recruit-cutscene-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+.recruit-cutscene-skip {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top, 0px));
+  right: max(12px, env(safe-area-inset-right, 0px));
+  z-index: 2;
+  padding: 8px 16px;
+  border: 1px solid rgba(255, 220, 160, 0.45);
+  border-radius: 999px;
+  background: rgba(8, 10, 16, 0.72);
+  color: rgba(255, 235, 210, 0.92);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* —— 结果揭晓 —— */
+.recruit-result {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.recruit-result.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.recruit-result-veil {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(90% 70% at 50% 46%, rgba(8, 10, 18, 0.55), rgba(2, 3, 6, 0.92));
+  backdrop-filter: blur(3px);
+}
+
+.recruit-result-inner {
+  position: relative;
+  width: min(560px, 94vw);
+  max-height: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  overflow-y: auto;
+  padding: 8px 4px 92px;
+}
+
+.recruit-result-head {
+  text-align: center;
+}
+
+.recruit-result-head strong {
+  display: block;
+  font-size: clamp(18px, 5vw, 24px);
+  letter-spacing: 0.14em;
+  color: #ffe9c4;
+  text-shadow: 0 0 22px rgba(255, 200, 120, 0.5), 0 2px 8px rgba(0, 0, 0, 0.9);
+}
+
+.recruit-result-head small {
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  color: rgba(240, 220, 200, 0.7);
+}
+
+.recruit-result-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.recruit-result-inner.is-single .recruit-result-grid {
+  flex-wrap: nowrap;
+}
+
+.recruit-result-inner.is-single .recruit-card {
+  width: min(280px, 78vw);
+}
+
+/* 竖形结果卡：图标在上、立绘在下（角色档案式） */
+.recruit-card {
+  position: relative;
+  width: calc(50% - 6px);
+  max-width: 168px;
+  /* 揭晓：先隐身等待错峰，随后白光爆发＋由小变大旋转落位 */
+  opacity: 0;
+  transform: scale(0.2) rotate(-14deg);
+  animation: recruit-reveal 1.35s cubic-bezier(0.16, 1.3, 0.3, 1) forwards;
+  animation-delay: var(--reveal-delay, 0s);
+}
+
+@keyframes recruit-reveal {
+  0% {
+    opacity: 0;
+    transform: scale(0.15) rotate(-16deg);
+    filter: brightness(3);
+  }
+  35% {
+    opacity: 1;
+    transform: scale(1.12) rotate(4deg);
+    filter: brightness(2.2);
+  }
+  60% {
+    transform: scale(0.97) rotate(-1.5deg);
+    filter: brightness(1.2);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+    filter: brightness(1);
+  }
+}
+
+/* 白光旋转爆发：三层错速旋转的光轮 */
+.recruit-card-burst {
+  position: absolute;
+  left: 50%;
+  top: 38%;
+  width: 190%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+  animation: recruit-burst 1.5s ease-out forwards;
+  animation-delay: var(--reveal-delay, 0s);
+}
+
+.recruit-card-burst i {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(255, 255, 255, 0.85) 18deg, transparent 60deg, transparent 120deg, rgba(255, 255, 255, 0.6) 150deg, transparent 200deg, transparent 260deg, rgba(255, 255, 255, 0.85) 300deg, transparent 340deg);
+  animation: recruit-spin 1.4s linear infinite;
+}
+
+.recruit-card-burst i:nth-child(2) {
+  inset: 12%;
+  animation-duration: 0.9s;
+  animation-direction: reverse;
+  opacity: 0.8;
+}
+
+.recruit-card-burst i:nth-child(3) {
+  inset: 24%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.25) 55%, transparent 72%);
+  animation: none;
+}
+
+@keyframes recruit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes recruit-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.25);
+  }
+  25% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  70% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.25);
+  }
+}
+
+.recruit-card-flash {
+  position: absolute;
+  inset: -6%;
+  z-index: 1;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95), transparent 62%);
+  opacity: 0;
+  animation: recruit-flash 0.9s ease-out forwards;
+  animation-delay: var(--reveal-delay, 0s);
+  pointer-events: none;
+}
+
+@keyframes recruit-flash {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.recruit-card-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 8px 8px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(10, 14, 22, 0.94), rgba(6, 8, 14, 0.96));
+  overflow: hidden;
+}
+
+/* 稀有度光：SR 冰蓝 / SSR 绛紫 / UR 熔金 */
+.recruit-card.is-sr .recruit-card-frame {
+  border: 1px solid rgba(95, 200, 255, 0.75);
+  box-shadow: 0 0 18px rgba(95, 200, 255, 0.4), 0 0 46px rgba(95, 200, 255, 0.18), inset 0 0 24px rgba(95, 200, 255, 0.1);
+}
+
+.recruit-card.is-ssr .recruit-card-frame {
+  border: 1px solid rgba(176, 107, 255, 0.8);
+  box-shadow: 0 0 20px rgba(176, 107, 255, 0.45), 0 0 52px rgba(176, 107, 255, 0.2), inset 0 0 24px rgba(176, 107, 255, 0.12);
+}
+
+.recruit-card.is-ur .recruit-card-frame {
+  border: 1px solid rgba(255, 208, 105, 0.9);
+  box-shadow: 0 0 22px rgba(255, 190, 90, 0.55), 0 0 60px rgba(255, 190, 90, 0.26), inset 0 0 26px rgba(255, 190, 90, 0.14);
+  animation: recruit-ur-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes recruit-ur-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 22px rgba(255, 190, 90, 0.55), 0 0 60px rgba(255, 190, 90, 0.26), inset 0 0 26px rgba(255, 190, 90, 0.14);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(255, 210, 110, 0.75), 0 0 80px rgba(255, 190, 90, 0.36), inset 0 0 30px rgba(255, 190, 90, 0.2);
+  }
+}
+
+.recruit-card-rarity {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #06121c;
+  background: var(--recruit-sr);
+}
+
+.is-ssr .recruit-card-rarity {
+  background: var(--recruit-ssr);
+  color: #160a26;
+}
+
+.is-ur .recruit-card-rarity {
+  background: linear-gradient(180deg, #ffe9b0, var(--recruit-ur));
+  color: #2a1a05;
+}
+
+.recruit-card-icon {
+  width: 44px;
+  height: 44px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  margin-bottom: 6px;
+}
+
+/* 卡通小头像：铺满圆角框，按角色立绘取景位置裁切 */
+.recruit-card-avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  display: block;
+}
+
+/* 竖形排布：图标 → 立绘（上下） */
+.recruit-card-art {
+  width: 100%;
+  height: 148px;
+  object-fit: contain;
+  object-position: center bottom;
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.6));
+}
+
+.recruit-result-inner.is-single .recruit-card-art {
+  height: 300px;
+}
+
+/* 十连：5 行一屏放下（图标在上、立绘在下），不依赖滚动 */
+.is-multi .recruit-card {
+  width: calc(50% - 3px);
+  max-width: 148px;
+  padding: 3px 3px 2px;
+  border-radius: 9px;
+}
+
+.is-multi .recruit-card-art {
+  height: 34px;
+}
+
+.is-multi .recruit-card-rarity {
+  top: 3px;
+  left: 3px;
+  font-size: 8.5px;
+  padding: 0 5px;
+}
+
+.is-multi .recruit-card-foot b {
+  font-size: 10.5px;
+  line-height: 1.1;
+}
+
+.is-multi .recruit-card-foot small {
+  font-size: 8px;
+  line-height: 1.05;
+}
+
+.is-multi .recruit-card-icon {
+  width: 38px;
+  height: 38px;
+  margin-bottom: 3px;
+  border-radius: 9px;
+}
+
+.is-multi .recruit-card-rarity {
+  top: 4px;
+  left: 4px;
+  font-size: 9px;
+  padding: 1px 6px;
+}
+
+.is-multi .recruit-card-foot {
+  margin-top: 3px;
+}
+
+.is-multi .recruit-result-grid {
+  gap: 4px;
+}
+
+/* 确认键常驻底部，滚到底也能一键返回 */
+.recruit-result-confirm {
+  position: fixed;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  margin-top: 2px;
+  padding: 10px 30px;
+  font-size: 15px;
+}
+
+.recruit-card-foot {
+  margin-top: 6px;
+  text-align: center;
+}
+
+.recruit-card-foot b {
+  display: block;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: #f2e6d2;
+}
+
+.recruit-card-foot small {
+  font-size: 10px;
+  color: rgba(240, 220, 200, 0.7);
+}
+
+.recruit-result-confirm {
+  min-width: 200px;
+  padding: 12px 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 230, 170, 0.8);
+  background: linear-gradient(180deg, #ffe3a1, #e0a44c 55%, #9a6420);
+  color: #2b1c08;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  box-shadow: 0 6px 26px rgba(255, 190, 90, 0.4);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.recruit-result-confirm:disabled {
+  filter: grayscale(0.7) brightness(0.65);
+  cursor: wait;
+}
+
+.recruit-result-confirm:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.recruit-result-hint {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: rgba(240, 220, 200, 0.65);
+}
+
+.recruit-result-inner.is-multi .recruit-result-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+}
+
+.recruit-result-inner.is-multi .recruit-result-head strong {
+  font-size: clamp(14px, 3.6vw, 17px);
+}
+
+.recruit-result-inner.is-multi .recruit-result-head small {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+}
+
+.recruit-result-inner.is-multi .recruit-result-hint {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  margin-bottom: 0;
+  opacity: 0.85;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recruit-bg-img,
+  .recruit-bg-beam,
+  .recruit-figure,
+  .recruit-figure-glow,
+  .recruit-figure-shadow,
+  .recruit-card,
+  .recruit-card-burst,
+  .recruit-card-flash,
+  .recruit-pull.is-ten,
+  .recruit-card.is-ur .recruit-card-frame {
+    animation-duration: 0.01ms !important;
+  }
+}

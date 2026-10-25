@@ -48,8 +48,8 @@
   position: absolute;
   left: 0;
   right: 0;
-  top: 6%;
-  height: 58%;
+  top: 4%;
+  height: 64%;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -123,6 +123,9 @@
   display: flex;
   align-items: flex-start;
   justify-content: center;
+  /* 底部渐隐融入暗幕，避免立绘被硬切断 */
+  -webkit-mask-image: linear-gradient(180deg, #000 80%, transparent 99%);
+  mask-image: linear-gradient(180deg, #000 80%, transparent 99%);
 }
 
 .story-portrait-video,
@@ -131,7 +134,8 @@
   height: 100%;
   object-fit: contain;
   object-position: center top;
-  transform: scale(1.48) translateY(10%);
+  /* 可按角色用 --story-fit-scale / --story-fit-y 微调取景 */
+  transform: scale(var(--story-fit-scale, 1.48)) translateY(var(--story-fit-y, 10%));
   transform-origin: center top;
   pointer-events: none;
 }
@@ -153,7 +157,9 @@
   align-items: center;
 }
 
-.story-skip {
+/* 双类选择器：须压过 .story-ui-btn 的 position:relative / width:100%，
+   否则跳过按钮退化为流内全宽元素，压在对话框顶边上（2026-09-19 修复） */
+.story-ui-btn.story-skip {
   position: absolute;
   top: max(0.75rem, env(safe-area-inset-top));
   right: 0.75rem;
@@ -197,15 +203,69 @@
   grid-area: 1 / 1;
   position: relative;
   z-index: 1;
-  padding: 0.9rem 1.15rem 1.45rem 1.2rem;
+  padding: 1.05rem 1.15rem 1.55rem 1.1rem;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.7rem;
+  align-items: start;
 }
 
+.story-main {
+  position: relative;
+  min-width: 0;
+}
+
+/* 对话框表情图（emotion-poses 差分，回落头像） */
+.story-face {
+  width: 4.4rem;
+  aspect-ratio: 3 / 4;
+  border-radius: 0.55rem;
+  overflow: hidden;
+  border: 1px solid rgba(240, 215, 176, 0.5);
+  background: linear-gradient(180deg, rgba(22, 17, 12, 0.9), rgba(8, 7, 6, 0.95));
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.story-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  transform: scale(1.12);
+  transform-origin: center top;
+}
+
+.story-face.is-hidden {
+  display: none;
+}
+
+.story-face.is-face-in img {
+  animation: story-face-in 0.28s ease both;
+}
+
+@keyframes story-face-in {
+  from {
+    opacity: 0;
+    transform: scale(1.12) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1.12) translateY(0);
+  }
+}
+
+/* 名签：铜色侧条小牌，与废土 UI 同色系 */
 .story-name {
-  font-size: 0.88rem;
+  display: inline-block;
+  font-size: 0.85rem;
   font-weight: 800;
+  letter-spacing: 0.04em;
   color: #f0d7b0;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
-  margin-bottom: 0.3rem;
+  padding: 0.08rem 0.55rem 0.08rem 0.45rem;
+  margin-bottom: 0.35rem;
+  border-left: 3px solid rgba(200, 155, 94, 0.9);
+  background: linear-gradient(90deg, rgba(200, 155, 94, 0.22), rgba(200, 155, 94, 0));
 }
 
 .story-name.is-hidden {
@@ -220,6 +280,14 @@
   color: #f4eee6;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
   min-height: 3.2em;
+}
+
+/* 旁白：斜体居中、去名签，与对白区分 */
+.story-box[data-bubble='narration'] .story-text {
+  font-style: italic;
+  color: #ddd2c0;
+  letter-spacing: 0.03em;
+  text-align: center;
 }
 
 .story-caret {
@@ -299,23 +367,59 @@
   width: min(94vw, 430px);
   z-index: 9000;
   display: grid;
-  grid-template-columns: 64px 1fr;
-  gap: 0.5rem 0.6rem;
-  padding: 0.7rem 0.8rem 0.75rem;
+  grid-template-columns: 56px 1fr;
+  gap: 0.5rem 0.65rem;
+  padding: 0.85rem 0.95rem 0.95rem;
   pointer-events: none;
   background: transparent;
   border: 0;
   box-shadow: none;
-  max-height: min(34vh, 220px);
 }
 
+/* 面板图绝对铺满坞体：内容多高框多高，按钮永远不出框 */
 .story-guide-frame {
-  grid-column: 1 / -1;
-  grid-row: 1 / -1;
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: fill;
   pointer-events: none;
+}
+
+/* 子页引导坞置顶：底部操作区（可用机体/开箱按钮）必须露出 */
+.story-guide-dock--top {
+  top: calc(3.6rem + env(safe-area-inset-top));
+  bottom: auto;
+}
+
+/* 引导坞整体可点（点击折叠/展开）；文字与按钮保持原有交互 */
+.story-guide-dock {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* 折叠态：收成右侧头像小圆钮 */
+.story-guide-dock.is-collapsed {
+  left: auto;
+  right: 0.6rem;
+  transform: none;
+  width: auto;
+  grid-template-columns: 44px;
+  gap: 0;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: rgba(16, 13, 10, 0.82);
+  border: 1px solid rgba(200, 155, 94, 0.6);
+}
+
+.story-guide-dock.is-collapsed .story-guide-body,
+.story-guide-dock.is-collapsed .story-guide-frame {
+  display: none;
+}
+
+.story-guide-dock.is-collapsed .story-guide-art {
+  width: 44px;
+  height: 44px;
 }
 
 .story-guide-art,
@@ -332,11 +436,13 @@
 
 .story-guide-art {
   grid-column: 1;
-  width: 64px;
-  height: 64px;
+  width: 56px;
+  height: 56px;
   align-self: center;
-  border-radius: 8px;
+  border-radius: 50%;
   overflow: hidden;
+  border: 2px solid rgba(200, 155, 94, 0.75);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
 }
 
 .story-guide-body {
@@ -352,18 +458,18 @@
   height: 100%;
   object-fit: cover;
   object-position: top center;
-  transform: scale(1.35) translateY(6%);
+  transform: scale(1.5) translateY(8%);
   animation: story-guide-art-in 0.45s ease both;
 }
 
 @keyframes story-guide-art-in {
   from {
     opacity: 0;
-    transform: scale(1.2) translateY(10%);
+    transform: scale(1.3) translateY(12%);
   }
   to {
     opacity: 1;
-    transform: scale(1.35) translateY(6%);
+    transform: scale(1.5) translateY(8%);
   }
 }
 
@@ -378,9 +484,11 @@
   font-size: 0.8rem;
   line-height: 1.45;
   color: #f4eee6;
-  max-height: 5.8em;
+  max-height: 6.2em;
   overflow: auto;
   pointer-events: auto;
+  /* 引导台词里的 \n 是有意断句，需保留换行 */
+  white-space: pre-wrap;
 }
 
 .story-guide-actions {
@@ -420,17 +528,135 @@
   background: rgba(8, 10, 14, 0.55);
 }
 
-/* 高亮脉冲 */
-.story-guide-highlight {
-  position: relative !important;
-  z-index: 9100 !important;
-  box-shadow: 0 0 0 2px rgba(0, 229, 255, 0.95), 0 0 18px rgba(0, 229, 255, 0.55) !important;
-  animation: story-guide-pulse 1.4s ease-in-out infinite;
+/* 引导聚光：SVG 单路径暗幕挖洞（多洞互不遮挡）+ 实体描边 + 呼吸光晕 + 指向箭头 + 顺序徽章 */
+.story-spotlight {
+  position: fixed;
+  inset: 0;
+  z-index: 8900;
+  pointer-events: none;
 }
 
-@keyframes story-guide-pulse {
+.story-spotlight.is-hidden {
+  display: none;
+}
+
+.story-spotlight-veil {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.story-spotlight-veil path {
+  fill: rgba(5, 7, 10, 0.55);
+}
+
+.story-spotlight-hole {
+  position: absolute;
+  border-radius: 10px;
+  border: 2px solid rgba(240, 190, 120, 0.95);
+  box-shadow:
+    0 0 18px rgba(222, 164, 92, 0.8),
+    inset 0 0 14px rgba(222, 164, 92, 0.35);
+  animation: story-spot-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes story-spot-pulse {
   50% {
-    box-shadow: 0 0 0 3px rgba(0, 229, 255, 1), 0 0 26px rgba(0, 229, 255, 0.75);
+    border-color: #ffe0b0;
+    box-shadow:
+      0 0 30px rgba(240, 190, 120, 1),
+      inset 0 0 22px rgba(240, 190, 120, 0.55);
+  }
+}
+
+/* 顺序徽章：多目标时标注点击先后（1=先点，2=后点） */
+.story-spotlight-order {
+  position: absolute;
+  top: -0.8rem;
+  left: -0.7rem;
+  min-width: 1.45rem;
+  height: 1.45rem;
+  padding: 0 0.22rem;
+  box-sizing: border-box;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #f6cd8a, #d09a52);
+  border: 1px solid rgba(255, 226, 176, 0.9);
+  color: #2a1a08;
+  font-size: 0.85rem;
+  font-weight: 800;
+  font-family: inherit;
+  box-shadow:
+    0 0 10px rgba(240, 190, 120, 0.9),
+    0 2px 4px rgba(0, 0, 0, 0.55);
+}
+
+.story-spotlight-arrow {
+  position: absolute;
+  left: 50%;
+  top: -1.45rem;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 0.5rem solid transparent;
+  border-right: 0.5rem solid transparent;
+  border-top: 0.8rem solid rgba(240, 190, 120, 0.98);
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+  animation: story-spot-arrow 1s ease-in-out infinite;
+}
+
+/* ── 有序步：只能按 1→2→3 点 ──
+   is-next 当前该点：正常呼吸 + 箭头；is-locked 还没轮到：暗描边、无箭头、不呼吸；
+   is-done 已点过：绿色描边 + ✓。纯视觉强化，真正的拦截在点击捕获阶段。 */
+.story-spotlight-hole.is-locked {
+  border-color: rgba(150, 140, 128, 0.55);
+  box-shadow: none;
+  animation: none;
+}
+
+.story-spotlight-hole.is-locked .story-spotlight-order {
+  background: linear-gradient(180deg, #6d6459, #4b453e);
+  border-color: rgba(190, 180, 165, 0.5);
+  color: rgba(240, 235, 225, 0.8);
+  box-shadow: none;
+}
+
+.story-spotlight-hole.is-locked .story-spotlight-arrow {
+  display: none;
+}
+
+.story-spotlight-hole.is-done {
+  border-color: rgba(130, 220, 150, 0.85);
+  box-shadow: 0 0 14px rgba(110, 220, 140, 0.55);
+  animation: none;
+}
+
+.story-spotlight-hole.is-done .story-spotlight-order {
+  background: linear-gradient(180deg, #a9e8b8, #5fae74);
+  border-color: rgba(200, 255, 210, 0.9);
+  color: #103018;
+  box-shadow: 0 0 8px rgba(110, 220, 140, 0.6);
+}
+
+.story-spotlight-hole.is-done .story-spotlight-arrow {
+  display: none;
+}
+
+/* 目标按钮自身的锁定/完成态（描边直接加在按钮上，玩家不看洞口也能分辨） */
+.story-guide-target.story-guide-locked {
+  filter: grayscale(0.75) brightness(0.72);
+}
+
+.story-guide-target.story-guide-done {
+  filter: none;
+}
+
+@keyframes story-spot-arrow {
+  50% {
+    transform: translateX(-50%) translateY(-0.35rem);
   }
 }
 
@@ -461,4 +687,118 @@
   right: 0.35rem;
   font-size: 0.55rem;
   color: var(--warn, #ffb020);
+}
+
+/* 引导坞在场时，子页滚动区底部让位，避免内容被坞遮挡 */
+.shell.has-story-guide .content-sub {
+  padding-bottom: 18rem;
+}
+
+/* P2 懒加载一句话说明：金色描边小条，引导完成后才出现，只讲一次 */
+.lazy-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.5rem 0;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid rgba(255, 205, 90, 0.65);
+  border-radius: 0.5rem;
+  background: rgba(40, 30, 10, 0.82);
+  color: #ffe6ad;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.lazy-hint button {
+  flex: none;
+  margin-left: auto;
+  padding: 0.2rem 0.7rem;
+  border: 1px solid rgba(255, 205, 90, 0.8);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: #ffd76a;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.char-detail-guide-hint {
+  margin: 0.4rem 0;
+  padding: 0.4rem 0.6rem;
+  border-left: 3px solid #ffd76a;
+  color: #ffe6ad;
+  font-size: 0.82rem;
+}
+.char-detail-guide-hint span {
+  opacity: 0.65;
+  font-size: 0.72rem;
+}
+
+/* 武器页换装自定义下拉：替代原生 select，手机不再弹白底框 */
+.equip-inline {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+.equip-inline-btn {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgba(255, 205, 90, 0.55);
+  border-radius: 0.45rem;
+  background: rgba(20, 14, 6, 0.9);
+  color: #ffe6ad;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+.equip-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.3rem;
+  padding: 0.4rem;
+  border: 1px solid rgba(255, 205, 90, 0.65);
+  border-radius: 0.5rem;
+  background: rgba(24, 17, 8, 0.97);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+.equip-menu button {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: #ffe6ad;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+.equip-menu button:not(:disabled):active {
+  border-color: rgba(255, 205, 90, 0.8);
+  background: rgba(255, 205, 90, 0.12);
+}
+.equip-menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 营地配置页原生下拉（低频设置项）：深色打底，不再刺眼白底 */
+select[data-provider-select],
+select[data-model-select] {
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgba(255, 205, 90, 0.45);
+  border-radius: 0.45rem;
+  background: rgba(20, 14, 6, 0.92);
+  color: #ffe6ad;
+  font-size: 0.85rem;
+}
+select[data-provider-select] option,
+select[data-model-select] option {
+  background: #1c1409;
+  color: #ffe6ad;
 }

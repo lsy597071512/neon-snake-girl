@@ -183,6 +183,27 @@ export function shouldPromoteToTimeline(
   return false;
 }
 
+/** 重置存档：清空人生时间线 L2（IDB + LS） */
+export async function purgeLifeTimeline(): Promise<void> {
+  try {
+    localStorage.removeItem(LS_FALLBACK);
+  } catch {
+    /* ignore */
+  }
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    /* IDB 不可用：LS 已清即可 */
+  }
+}
+
 export async function appendLifeTimeline(
   partial: Omit<LifeTimelineEntry, 'id' | 'tags'> & {
     id?: string;

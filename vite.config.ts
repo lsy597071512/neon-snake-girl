@@ -19,6 +19,36 @@ const TEX_MIME: Record<string, string> = {
   '.fbx': 'application/octet-stream',
 };
 
+/**
+ * P3：dist/tex 只拷 P0 首包资源（远端层走 CDN），这是**默认且唯一合法**的打包行为。
+ * 历史事故：漏设开关走 copyDir 全量拷贝，P1 皮肤 2.5GB 全进包 → APK 3GB。
+ * 仅本地排障可显式设 SHIP_FULL_TEX=1 全量，禁止用于发布。
+ */
+const SHIP_FULL_TEX = process.env.SHIP_FULL_TEX === '1';
+const SHIP_P0_ONLY = !SHIP_FULL_TEX;
+
+/** 按 ship-manifest-cdn.json 分层清单，只拷 tier=P0 的产物 + 两份清单 */
+function copyShipP0Only(shipRoot: string, out: string): void {
+  const cdnManifestPath = path.join(shipRoot, 'ship-manifest-cdn.json');
+  const manifest = JSON.parse(fs.readFileSync(cdnManifestPath, 'utf8')) as {
+    files: Record<string, { tier: string }>;
+  };
+  let copied = 0;
+  for (const [rel, meta] of Object.entries(manifest.files)) {
+    if (meta.tier !== 'P0') continue;
+    const from = path.join(shipRoot, rel);
+    if (!fs.existsSync(from)) continue;
+    const to = path.join(out, rel);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.copyFileSync(from, to);
+    copied += 1;
+  }
+  // 两份清单都必须进 dist：rename map（texUrl 用）+ 分层清单（版本门/下载管理器用）
+  fs.copyFileSync(path.join(shipRoot, 'ship-manifest.json'), path.join(out, 'ship-manifest.json'));
+  fs.copyFileSync(cdnManifestPath, path.join(out, 'ship-manifest-cdn.json'));
+  console.log(`[vite] SHIP_P0_ONLY: ${copied} P0 files + 2 manifests → dist/tex`);
+}
+
 function copyDir(src: string, dest: string): void {
   fs.mkdirSync(dest, { recursive: true });
   for (const name of fs.readdirSync(src)) {
@@ -96,7 +126,18 @@ function staticDirPlugin(route: string, dirName: string): Plugin {
       const shipManifest = path.join(shipRoot, 'ship-manifest.json');
       if (fs.existsSync(shipManifest)) {
         // P1：打包用压缩产物，源 tex/ 不动
-        copyDir(shipRoot, out);
+        // P3：默认只拷 P0 首包；SHIP_FULL_TEX=1 才是全量（仅排障，禁止发布）
+        const cdnManifest = path.join(shipRoot, 'ship-manifest-cdn.json');
+        if (SHIP_P0_ONLY && fs.existsSync(cdnManifest)) {
+          copyShipP0Only(shipRoot, out);
+        } else if (SHIP_FULL_TEX) {
+          console.warn('[vite] SHIP_FULL_TEX=1 全量拷贝 tex-ship → APK 会膨胀到数 GB，仅限本地排障！');
+          copyDir(shipRoot, out);
+        } else if (fs.existsSync(cdnManifest)) {
+          throw new Error('缺少 tex-ship/ship-manifest-cdn.json 的分层数据，无法做 P0 瘦身打包。请先运行 npm run assets:build-ship');
+        } else {
+          copyShipP0Only(shipRoot, out);
+        }
       } else if (fs.existsSync(root)) {
         copyTexFiltered(root, out);
       }
@@ -114,5 +155,12 @@ export default defineConfig({
   build: {
     target: 'es2018',
     outDir: 'dist',
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        stellarSkillPreview: path.resolve(__dirname, 'stellar-skill-preview.html'),
+        combatStellarLive: path.resolve(__dirname, 'combat-stellar-live.html'),
+      },
+    },
   },
 });

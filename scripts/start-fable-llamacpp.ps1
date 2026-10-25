@@ -30,7 +30,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# 换电脑 / 挪仓库后自愈计划任务（路径变了就重绑；不用手动再跑 install）
+# 自愈：把开机任务绑到固定目录 F:\Ollama\fable-home-gpu（与游戏仓库路径无关）
 try {
   $ensure = Join-Path $PSScriptRoot 'install-fable-autostart.ps1'
   if (Test-Path -LiteralPath $ensure) {
@@ -38,6 +38,24 @@ try {
   }
 } catch {
   Write-Host ("autostart ensure skipped: {0}" -f $_.Exception.Message) -ForegroundColor DarkYellow
+}
+
+# 若固定家目录已部署，优先用家目录启动（日志也落在家目录；与游戏仓库无关）
+$homeStart = @(
+  'F:\Ollama\fable-home-gpu\start-fable.ps1',
+  (Join-Path $env:LOCALAPPDATA 'RustBelt-Fable-HomeGpu\start-fable.ps1')
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if ($homeStart) {
+  $forward = @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $homeStart,
+    '-Port', [string]$Port, '-Ctx', [string]$Ctx, '-Reasoning', $Reasoning,
+    '-Gguf', $Gguf, '-LlamaServer', $LlamaServer, '-MtpGguf', $MtpGguf,
+    '-Alias', $Alias, '-GpuLayers', [string]$GpuLayers
+  )
+  if ($Mtp) { $forward += '-Mtp' }
+  if ($NoMtp) { $forward += '-NoMtp' }
+  & powershell.exe @forward
+  exit $LASTEXITCODE
 }
 
 if (-not (Test-Path -LiteralPath $LlamaServer)) {

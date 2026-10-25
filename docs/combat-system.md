@@ -21,7 +21,7 @@
 
 | 模式 | 说明 | 解锁条件 |
 |---|---|---|
-| **普通关卡** | 40 个程序生成的关卡，数值递增 | 默认 |
+| **普通关卡** | 5 章 × 12 关 × 普通/地狱双难度（共 120 关，程序化生成，数值递增） | 默认 |
 | **Boss 关卡** | 大型 Boss 敌人，有特殊机制 | 特定章节 |
 | **Raid 模式** | 多波次高难度战斗 | 通关后解锁 |
 | **Wave 模式** | 单波次战斗，快速刷图 | 扫荡系统 |
@@ -154,5 +154,35 @@ calculateTCP(characterId, weaponId, level) = {
 
 - 无震屏/命中停顿/战斗 SFX
 - 无连击结算爽点
-- 关卡无机制差异（40 关全公式堆数值）
+- 关卡无机制差异（5 章 120 关全公式堆数值）
 - 战斗操作无成长（无技能树/走位收益）
+
+---
+
+## 附：2026-10-10 落地修订（v2，以此为准）
+
+> 旧正文（TCP 公式、文件入口行数等）多处过期，仅保留作考古；实现细节以 [active-skills-spec.md](./active-skills-spec.md) 为准。
+
+### 技能系统入口
+- 13 主动技能：`Combat3D.releaseManualSkill(charId)` → 13 个 `exec*()`（CD 6/7/8 三档，`activeSkillCooldown`），左侧头像按钮触发，开局半 CD
+- 7 被动：`src/core/skillEffects.ts`（攻速/穿透/护盾/连闪/雨幕/裁决加成/同调），`getSkillModifiers(squadIds)` 全队聚合
+- 被动与手动大小规格区分：被动小包装 + "被动触发"横幅；手动大包装 + 施法者标记（`casterBurstFx`）
+
+### 健康值 = 血量
+- `characterCyberHealth`（0~100，存档持久化）即战斗血量；`applyHitCyberWear` 实时写回
+- 0 点倒下：停火 + 禁技能 + 外观（僚机隐藏/队长压暗）；全员倒下才判负；庇护 +15 / 爱心 +8 可复活
+- 编队门禁：义体标签 + 0 点禁用/拦截 + 一键跳过；进战斗全员体检
+
+### Boss 规则
+- 控制免疫：定身/减速对 Boss 无效（飘"免疫"）；击退 15%；后仰封顶 0.25；灼烧/直伤全额
+- Raid Boss（`SPAWN_Z-16` 静止，83 米外）：落点特效 ×1.5~1.8，终审追加专属金爆
+
+### Raid 分支补齐（`tickRaidSkillSystems`）
+Raid 走独立 update，主路技能系统需手动推进：按钮 CD、多段/炮弹/爱心/风刃/雨幕队列、灼烧跳伤、Boss 后仰衰减、状态环同步。漏任何一项都会出现"只播施法不结算"。
+
+### 数值曲线（`combatBalance.ts`）
+- 小怪血 ×(1 + min(0.5, tier×0.008)) 技能税；章节 Boss ×8 再 ×1.25；Raid `tcp×5.2`（地狱 8.0）
+- 承伤/波次/计时器不动；团队秒伤 ≈ 0.45×TCP；Raid 铁律 20 秒
+
+### 代码入口勘误
+- `Combat3D.ts` 已超 3000 行；`CombatScene.ts`/`enemies.ts`/`CombatSystem.ts` 三个旧引用名已不存在；敌人实例化走 `InstancedMesh`（**root 不在场景图**——跟随型 3D 物件必须挂 `scene` 逐帧同步，见 active-skills-spec §七-2）
